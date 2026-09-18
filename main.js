@@ -41,8 +41,6 @@ function escapeHtmlText(value) {
     .replace(/>/g, "&gt;");
 }
 
-// YouTube URL 시작 시간 추출
-// t=65 / t=65s / t=1m5s / t=1h2m3s / start=65
 function getYouTubeStartSeconds(inputUrl) {
   if (!inputUrl) return null;
 
@@ -118,7 +116,6 @@ function getImageExtension(contentType, imageUrl) {
   return ".jpg";
 }
 
-// 일반 본문 이미지 → w2000
 function normalizePostImageUrl(src) {
   if (!src) return null;
   if (src.startsWith("data:") || src.startsWith("blob:")) return null;
@@ -133,7 +130,6 @@ function normalizePostImageUrl(src) {
   }
 }
 
-// OG 썸네일 → 네이버가 제공하는 썸네일 URL 그대로 사용
 function normalizeThumbnailUrl(src) {
   if (!src) return null;
   if (src.startsWith("data:") || src.startsWith("blob:")) return null;
@@ -163,8 +159,84 @@ async function downloadImage(imageUrl, outputDir, number, type) {
   return { filename, size: buffer.length };
 }
 
+async function getNaverVideoSource(vid, inkey) {
+  const apiUrl = `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${encodeURIComponent(vid)}?key=${encodeURIComponent(inkey)}`;
+
+  const response = await fetch(apiUrl, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Referer: "https://blog.naver.com/",
+    },
+  });
+
+  if (!response.ok) throw new Error(`VOD API HTTP ${response.status} ${response.statusText}`);
+
+  const data = await response.json();
+  const videos = data.videos?.list || [];
+
+  if (!videos.length) throw new Error("재생 가능한 MP4를 찾지 못했습니다.");
+
+  const sorted = [...videos].sort((a, b) => {
+    const aw = Number(a.encodingOption?.width || 0);
+    const ah = Number(a.encodingOption?.height || 0);
+    const bw = Number(b.encodingOption?.width || 0);
+    const bh = Number(b.encodingOption?.height || 0);
+
+    return bw * bh - aw * ah;
+  });
+
+  const best = sorted[0];
+
+  return {
+    url: best.source,
+    width: Number(best.encodingOption?.width || 0),
+    height: Number(best.encodingOption?.height || 0),
+    size: Number(best.size || 0),
+  };
+}
+
+async function downloadVideo(videoUrl, outputDir, number) {
+  const filename = `video-${String(number).padStart(3, "0")}.mp4`;
+
+  const response = await fetch(videoUrl, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Referer: "https://blog.naver.com/",
+    },
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.writeFileSync(path.join(outputDir, filename), buffer);
+
+  return { filename, size: buffer.length };
+}
+
+async function downloadVideoThumbnail(thumbnailUrl, outputDir, number) {
+  const response = await fetch(thumbnailUrl, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Referer: "https://blog.naver.com/",
+    },
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+
+  const contentType = response.headers.get("content-type") || "";
+  const extension = getImageExtension(contentType, thumbnailUrl);
+  const filename = `video-thumb-${String(number).padStart(3, "0")}${extension}`;
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.writeFileSync(path.join(outputDir, filename), buffer);
+
+  return { filename, size: buffer.length };
+}
+
 function normalizeNaverHtml($, content) {
   const images = [];
+  const videos = [];
 
   // YouTube oEmbed
   content.find(".se-component.se-oembed").each((_, el) => {
@@ -186,6 +258,7 @@ function normalizeNaverHtml($, content) {
     }
 
     const data = moduleData.data;
+
     if (!data || data.providerName !== "YouTube") return;
 
     const inputUrl = data.inputUrl || "";
@@ -193,11 +266,59 @@ function normalizeNaverHtml($, content) {
 
     if (!iframeHtml) return;
 
-    const startSeconds = getYouTubeStartSeconds(inputUrl);
-    iframeHtml = applyYouTubeStartTime(iframeHtml, startSeconds);
+    iframeHtml = applyYouTubeStartTime(iframeHtml, getYouTubeStartSeconds(inputUrl));
 
     const encodedIframe = Buffer.from(iframeHtml, "utf8").toString("base64");
     $component.replaceWith(`NAVEROEMBEDSTART${encodedIframe}NAVEROEMBEDEND`);
+  });
+
+  // 네이버 직접 업로드 동영상
+  content.find(".se-component.se-video").each((_, el) => {
+    const $component = $(el);
+    const $data = $component.find("script.__se_module_data").first();
+
+    if (!$data.length) {
+      console.warn("동영상 module data를 찾지 못했습니다.");
+      return;
+    }
+
+    const raw = $data.attr("data-module-v2") || $data.attr("data-module");
+
+    if (!raw) {
+      console.warn("동영상 data-module을 찾지 못했습니다.");
+      return;
+    }
+
+    let moduleData;
+
+    try {
+      moduleData = JSON.parse(raw);
+    } catch (error) {
+      console.warn("동영상 데이터 파싱 실패:", error.message);
+      return;
+    }
+
+    const data = moduleData.data || moduleData;
+
+    if (!data.vid || !data.inkey) {
+      console.warn("동영상 vid/inkey를 찾지 못했습니다.");
+      return;
+    }
+
+    const index = videos.length;
+    const token = `NAVERVIDEO${index}END`;
+
+    videos.push({
+      token,
+      vid: data.vid,
+      inkey: data.inkey,
+      thumbnail: normalizeThumbnailUrl(data.thumbnail || ""),
+      title: data.title || "",
+      originalWidth: Number(data.originalWidth || 0),
+      originalHeight: Number(data.originalHeight || 0),
+    });
+
+    $component.replaceWith(token);
   });
 
   // OG 링크 미리보기 → table 카드
@@ -233,7 +354,6 @@ function normalizeNaverHtml($, content) {
       }
     }
 
-    // OG 썸네일
     const $img = $component.find("img").first();
     let imageSrc = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
     let imageToken = null;
@@ -264,20 +384,9 @@ function normalizeNaverHtml($, content) {
     let cardHtml;
 
     if (imageToken) {
-      cardHtml =
-        `<table>` +
-        `<tbody><tr>` +
-        `<td width="180" valign="middle"><a href="${safeHref}" target="_blank"><img src="${imageToken}" width="180"></a></td>` +
-        `<td valign="middle">${infoHtml}</td>` +
-        `</tr></tbody>` +
-        `</table>`;
+      cardHtml = `<table><tbody><tr><td width="180" valign="middle"><a href="${safeHref}" target="_blank"><img src="${imageToken}" width="180"></a></td><td valign="middle">${infoHtml}</td></tr></tbody></table>`;
     } else {
-      cardHtml =
-        `<table>` +
-        `<tbody><tr>` +
-        `<td>${infoHtml}</td>` +
-        `</tr></tbody>` +
-        `</table>`;
+      cardHtml = `<table><tbody><tr><td>${infoHtml}</td></tr></tbody></table>`;
     }
 
     const encodedCard = Buffer.from(cardHtml, "utf8").toString("base64");
@@ -293,6 +402,7 @@ function normalizeNaverHtml($, content) {
     let src = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
 
     src = normalizePostImageUrl(src);
+
     if (!src) return;
 
     const index = images.length;
@@ -309,7 +419,7 @@ function normalizeNaverHtml($, content) {
     $img.removeAttr("data-src");
   });
 
-  // href 없는 의미 없는 이미지 링크만 제거
+  // href 없는 의미 없는 이미지 링크 제거
   content.find("a").each((_, a) => {
     const $a = $(a);
     const href = $a.attr("href");
@@ -319,7 +429,7 @@ function normalizeNaverHtml($, content) {
     }
   });
 
-  return images;
+  return { images, videos };
 }
 
 function createTurndown() {
@@ -331,12 +441,13 @@ function createTurndown() {
     strongDelimiter: "**",
   });
 
-  // 원래 본문의 <a> 링크 보존
+  // 링크 보존
   turndown.addRule("preserveLinks", {
     filter: "a",
 
     replacement(content, node) {
       const href = node.getAttribute("href");
+
       if (!href) return content;
 
       let attrs = `href="${escapeHtmlAttribute(href)}"`;
@@ -388,6 +499,7 @@ function createTurndown() {
 
     replacement(content, node) {
       const src = node.getAttribute("src");
+
       if (!src) return "";
 
       return `\n\n![](${src})\n\n`;
@@ -408,6 +520,7 @@ function createTurndown() {
       const text = content.replace(/\u200b/g, "").trim();
 
       if (!text) return "\nNAVEREMPTYLINE\n";
+
       return `${text}\n`;
     },
   });
@@ -415,7 +528,7 @@ function createTurndown() {
   return turndown;
 }
 
-// 네이버 빈 문단 복원
+// 빈 문단 복원
 // 연속 빈 문단은 <br> 최대 2개
 function restoreEmptyLines(markdown) {
   return markdown.replace(/(?:\s*NAVEREMPTYLINE\s*)+/g, (match) => {
@@ -454,8 +567,7 @@ function restoreOgCards(markdown) {
   });
 }
 
-// 이미지 + 썸네일 다운로드
-// image / thumbnail 번호는 각각 따로 증가
+// 본문 이미지 + OG 썸네일 로컬 저장
 async function localizeImages(markdown, images, outputDir) {
   let result = markdown;
   let imageNumber = 0;
@@ -476,12 +588,67 @@ async function localizeImages(markdown, images, outputDir) {
       const downloaded = await downloadImage(image.url, outputDir, number, image.type);
 
       console.log(`${image.type === "thumbnail" ? "썸네일" : "이미지"}: ${downloaded.filename} (${downloaded.size} bytes)`);
+
       result = result.replaceAll(image.token, downloaded.filename);
     } catch (error) {
       console.warn(`${image.type === "thumbnail" ? "썸네일" : "이미지"} 다운로드 실패: ${image.url}`);
       console.warn(`  ${error.message}`);
 
       result = result.replaceAll(image.token, image.url);
+    }
+  }
+
+  return result;
+}
+
+// 네이버 직접 업로드 동영상 로컬 저장
+async function localizeVideos(markdown, videos, outputDir) {
+  let result = markdown;
+
+  for (let i = 0; i < videos.length; i++) {
+    const video = videos[i];
+    const number = i + 1;
+
+    try {
+      console.log(`동영상 ${number}/${videos.length}: 재생정보 가져오는 중...`);
+
+      const source = await getNaverVideoSource(video.vid, video.inkey);
+
+      console.log(`동영상 ${number}: 최고화질 ${source.width}x${source.height}`);
+
+      const downloaded = await downloadVideo(source.url, outputDir, number);
+
+      console.log(`동영상 ${number}: ${downloaded.filename} (${downloaded.size} bytes)`);
+
+      let poster = "";
+
+      if (video.thumbnail) {
+        try {
+          const thumbnail = await downloadVideoThumbnail(video.thumbnail, outputDir, number);
+
+          poster = thumbnail.filename;
+
+          console.log(`동영상 썸네일 ${number}: ${thumbnail.filename} (${thumbnail.size} bytes)`);
+        } catch (error) {
+          console.warn(`동영상 썸네일 다운로드 실패: ${error.message}`);
+        }
+      }
+
+      const posterAttribute = poster ? ` poster="${escapeHtmlAttribute(poster)}"` : "";
+
+      // 가로폭 100%
+      const videoSrc = escapeHtmlAttribute(downloaded.filename);
+      const videoHtml = `<video controls style="width:100%; height:auto;"${posterAttribute}><source src="${videoSrc}" type="video/mp4"></video>`;
+
+      result = result.replaceAll(video.token, `\n\n${videoHtml}\n\n`);
+    } catch (error) {
+      console.warn(`동영상 ${number} 다운로드 실패: ${error.message}`);
+
+      const fallback = video.thumbnail
+        ? `<img src="${escapeHtmlAttribute(video.thumbnail)}" alt="${escapeHtmlAttribute(video.title || "video")}">`
+        : "[동영상 다운로드 실패]";
+
+      result = result.replaceAll(video.token, `\n\n${fallback}\n\n`);
     }
   }
 
@@ -546,7 +713,11 @@ async function getPost(inputUrl) {
   if (!content.length) content = $(".se3_view").first();
   if (!content.length) throw new Error("본문 영역을 찾지 못했습니다.");
 
-  const images = normalizeNaverHtml($, content);
+  const { images, videos } = normalizeNaverHtml($, content);
+
+  console.log(`본문 이미지: ${images.filter((x) => x.type === "image").length}개`);
+  console.log(`링크 썸네일: ${images.filter((x) => x.type === "thumbnail").length}개`);
+  console.log(`네이버 동영상: ${videos.length}개`);
 
   const turndown = createTurndown();
   let bodyMarkdown = turndown.turndown(content.html() || "");
@@ -556,7 +727,6 @@ async function getPost(inputUrl) {
 
   bodyMarkdown = restoreOEmbed(bodyMarkdown);
   bodyMarkdown = restoreOgCards(bodyMarkdown);
-
   bodyMarkdown = cleanMarkdown(bodyMarkdown);
 
   const markdown = [
@@ -576,6 +746,7 @@ async function getPost(inputUrl) {
     categoryNo,
     markdown,
     images,
+    videos,
   };
 }
 
@@ -596,7 +767,12 @@ async function main() {
 
   fs.mkdirSync(postDir, { recursive: true });
 
+  // 이미지 / 썸네일 저장
   post.markdown = await localizeImages(post.markdown, post.images, postDir);
+
+  // 네이버 동영상 / 동영상 썸네일 저장
+  post.markdown = await localizeVideos(post.markdown, post.videos, postDir);
+
   post.markdown = cleanMarkdown(post.markdown) + "\n";
 
   const outputPath = path.join(postDir, "index.md");
@@ -605,6 +781,9 @@ async function main() {
 
   console.log("");
   console.log(`완료: ${outputPath}`);
+  console.log(`이미지: ${post.images.filter((x) => x.type === "image").length}개`);
+  console.log(`링크 썸네일: ${post.images.filter((x) => x.type === "thumbnail").length}개`);
+  console.log(`동영상: ${post.videos.length}개`);
   console.log(`글자 수: ${post.markdown.length}`);
 }
 
