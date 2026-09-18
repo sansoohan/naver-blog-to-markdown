@@ -238,7 +238,7 @@ function normalizeNaverHtml($, content) {
   const images = [];
   const videos = [];
 
-  // YouTube oEmbed
+  // YouTube
   content.find(".se-component.se-oembed").each((_, el) => {
     const $component = $(el);
     const $data = $component.find("script.__se_module_data").first();
@@ -321,7 +321,7 @@ function normalizeNaverHtml($, content) {
     $component.replaceWith(token);
   });
 
-  // OG 링크 미리보기 → table 카드
+  // OG 링크 카드
   content.find(".se-component.se-oglink").each((_, el) => {
     const $component = $(el);
     const $link = $component.find("a[href]").first();
@@ -393,7 +393,7 @@ function normalizeNaverHtml($, content) {
     $component.replaceWith(`NAVEROGCARDSTART${encodedCard}NAVEROGCARDEND`);
   });
 
-  // 불필요 요소 제거
+  // script 제거
   content.find("script, style, noscript").remove();
 
   // 일반 본문 이미지
@@ -402,24 +402,34 @@ function normalizeNaverHtml($, content) {
     let src = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
 
     src = normalizePostImageUrl(src);
-
     if (!src) return;
 
     const index = images.length;
     const token = `NAVERIMAGE${index}END`;
 
+    // 네이버에서 실제 표시되는 이미지 크기
+    const width = Number($img.attr("data-width")) || null;
+    const height = Number($img.attr("data-height")) || null;
+
     images.push({
       token,
       url: src,
       type: "image",
+      width,
+      height,
     });
 
     $img.attr("src", token);
+
+    // Turndown에서 사용할 수 있도록 width/height로 복사
+    if (width) $img.attr("width", String(width));
+    if (height) $img.attr("height", String(height));
+
     $img.removeAttr("data-lazy-src");
     $img.removeAttr("data-src");
   });
 
-  // href 없는 의미 없는 이미지 링크 제거
+  // 의미 없는 이미지 링크 제거
   content.find("a").each((_, a) => {
     const $a = $(a);
     const href = $a.attr("href");
@@ -441,13 +451,12 @@ function createTurndown() {
     strongDelimiter: "**",
   });
 
-  // 링크 보존
+  // 링크
   turndown.addRule("preserveLinks", {
     filter: "a",
 
     replacement(content, node) {
       const href = node.getAttribute("href");
-
       if (!href) return content;
 
       let attrs = `href="${escapeHtmlAttribute(href)}"`;
@@ -462,7 +471,7 @@ function createTurndown() {
     },
   });
 
-  // 네이버 글자 크기
+  // 글자 크기
   turndown.addRule("naverFontSize", {
     filter(node) {
       if (node.nodeName !== "SPAN") return false;
@@ -494,19 +503,25 @@ function createTurndown() {
   });
 
   // 이미지
+  // data-width가 있었으면 네이버 실제 표시 크기를 HTML width로 보존
   turndown.addRule("naverImage", {
     filter: "img",
 
     replacement(content, node) {
       const src = node.getAttribute("src");
+      const width = node.getAttribute("width");
 
       if (!src) return "";
+
+      if (width) {
+        return `\n\n<img src="${src}" width="${width}" style="max-width:100%; height:auto;">\n\n`;
+      }
 
       return `\n\n![](${src})\n\n`;
     },
   });
 
-  // 네이버 문단
+  // 문단
   turndown.addRule("naverParagraph", {
     filter(node) {
       return (
@@ -528,8 +543,6 @@ function createTurndown() {
   return turndown;
 }
 
-// 빈 문단 복원
-// 연속 빈 문단은 <br> 최대 2개
 function restoreEmptyLines(markdown) {
   return markdown.replace(/(?:\s*NAVEREMPTYLINE\s*)+/g, (match) => {
     const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
@@ -541,7 +554,6 @@ function restoreEmptyLines(markdown) {
   });
 }
 
-// YouTube iframe 복원
 function restoreOEmbed(markdown) {
   return markdown.replace(/NAVEROEMBEDSTART([A-Za-z0-9+/=]+)NAVEROEMBEDEND/g, (_, encodedIframe) => {
     try {
@@ -554,7 +566,6 @@ function restoreOEmbed(markdown) {
   });
 }
 
-// OG 카드 복원
 function restoreOgCards(markdown) {
   return markdown.replace(/NAVEROGCARDSTART([A-Za-z0-9+/=]+)NAVEROGCARDEND/g, (_, encodedCard) => {
     try {
@@ -567,7 +578,6 @@ function restoreOgCards(markdown) {
   });
 }
 
-// 본문 이미지 + OG 썸네일 로컬 저장
 async function localizeImages(markdown, images, outputDir) {
   let result = markdown;
   let imageNumber = 0;
@@ -587,11 +597,17 @@ async function localizeImages(markdown, images, outputDir) {
     try {
       const downloaded = await downloadImage(image.url, outputDir, number, image.type);
 
-      console.log(`${image.type === "thumbnail" ? "썸네일" : "이미지"}: ${downloaded.filename} (${downloaded.size} bytes)`);
+      console.log(
+        `${image.type === "thumbnail" ? "썸네일" : "이미지"}: ` +
+        `${downloaded.filename} (${downloaded.size} bytes)`
+      );
 
       result = result.replaceAll(image.token, downloaded.filename);
     } catch (error) {
-      console.warn(`${image.type === "thumbnail" ? "썸네일" : "이미지"} 다운로드 실패: ${image.url}`);
+      console.warn(
+        `${image.type === "thumbnail" ? "썸네일" : "이미지"} 다운로드 실패: ${image.url}`
+      );
+
       console.warn(`  ${error.message}`);
 
       result = result.replaceAll(image.token, image.url);
@@ -601,7 +617,6 @@ async function localizeImages(markdown, images, outputDir) {
   return result;
 }
 
-// 네이버 직접 업로드 동영상 로컬 저장
 async function localizeVideos(markdown, videos, outputDir) {
   let result = markdown;
 
@@ -618,27 +633,41 @@ async function localizeVideos(markdown, videos, outputDir) {
 
       const downloaded = await downloadVideo(source.url, outputDir, number);
 
-      console.log(`동영상 ${number}: ${downloaded.filename} (${downloaded.size} bytes)`);
+      console.log(
+        `동영상 ${number}: ${downloaded.filename} (${downloaded.size} bytes)`
+      );
 
       let poster = "";
 
       if (video.thumbnail) {
         try {
-          const thumbnail = await downloadVideoThumbnail(video.thumbnail, outputDir, number);
+          const thumbnail = await downloadVideoThumbnail(
+            video.thumbnail,
+            outputDir,
+            number
+          );
 
           poster = thumbnail.filename;
 
-          console.log(`동영상 썸네일 ${number}: ${thumbnail.filename} (${thumbnail.size} bytes)`);
+          console.log(
+            `동영상 썸네일 ${number}: ` +
+            `${thumbnail.filename} (${thumbnail.size} bytes)`
+          );
         } catch (error) {
           console.warn(`동영상 썸네일 다운로드 실패: ${error.message}`);
         }
       }
 
-      const posterAttribute = poster ? ` poster="${escapeHtmlAttribute(poster)}"` : "";
+      const posterAttribute = poster
+        ? ` poster="${escapeHtmlAttribute(poster)}"`
+        : "";
 
-      // 가로폭 100%
       const videoSrc = escapeHtmlAttribute(downloaded.filename);
-      const videoHtml = `<video controls style="width:100%; height:auto;"${posterAttribute}><source src="${videoSrc}" type="video/mp4"></video>`;
+
+      const videoHtml =
+        `<video controls style="width:100%; height:auto;"${posterAttribute}>` +
+        `<source src="${videoSrc}" type="video/mp4">` +
+        `</video>`;
 
       result = result.replaceAll(video.token, `\n\n${videoHtml}\n\n`);
     } catch (error) {
@@ -672,7 +701,9 @@ async function getPost(inputUrl) {
     },
   });
 
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
 
   const html = await response.text();
   const $ = cheerio.load(html);
@@ -688,6 +719,7 @@ async function getPost(inputUrl) {
 
   // 카테고리
   const categoryLink = $(".blog2_series a").first();
+
   let categoryName = categoryLink.text().trim();
   let categoryNo = null;
 
@@ -695,7 +727,11 @@ async function getPost(inputUrl) {
 
   if (categoryHref) {
     try {
-      const categoryUrl = new URL(categoryHref, "https://blog.naver.com");
+      const categoryUrl = new URL(
+        categoryHref,
+        "https://blog.naver.com"
+      );
+
       categoryNo = categoryUrl.searchParams.get("categoryNo");
     } catch {
       categoryNo = null;
@@ -704,23 +740,37 @@ async function getPost(inputUrl) {
 
   if (!categoryName) categoryName = "미분류";
 
-  console.log(`카테고리: ${categoryName}${categoryNo ? ` (${categoryNo})` : ""}`);
+  console.log(
+    `카테고리: ${categoryName}${categoryNo ? ` (${categoryNo})` : ""}`
+  );
 
   // 본문
   let content = $(".se-main-container").first();
 
   if (!content.length) content = $("#postViewArea").first();
   if (!content.length) content = $(".se3_view").first();
-  if (!content.length) throw new Error("본문 영역을 찾지 못했습니다.");
+
+  if (!content.length) {
+    throw new Error("본문 영역을 찾지 못했습니다.");
+  }
 
   const { images, videos } = normalizeNaverHtml($, content);
 
-  console.log(`본문 이미지: ${images.filter((x) => x.type === "image").length}개`);
-  console.log(`링크 썸네일: ${images.filter((x) => x.type === "thumbnail").length}개`);
+  console.log(
+    `본문 이미지: ${images.filter((x) => x.type === "image").length}개`
+  );
+
+  console.log(
+    `링크 썸네일: ${images.filter((x) => x.type === "thumbnail").length}개`
+  );
+
   console.log(`네이버 동영상: ${videos.length}개`);
 
   const turndown = createTurndown();
-  let bodyMarkdown = turndown.turndown(content.html() || "");
+
+  let bodyMarkdown = turndown.turndown(
+    content.html() || ""
+  );
 
   bodyMarkdown = restoreEmptyLines(bodyMarkdown);
   bodyMarkdown = cleanMarkdown(bodyMarkdown);
@@ -755,34 +805,71 @@ async function main() {
   const dest = process.argv[3] || "output";
 
   if (!inputUrl) {
-    console.log("사용법:\nnode main.js <네이버 블로그 글 URL> [저장폴더]");
+    console.log(
+      "사용법:\nnode main.js <네이버 블로그 글 URL> [저장폴더]"
+    );
+
     process.exit(1);
   }
 
   const post = await getPost(inputUrl);
 
-  const postFolderName = safeFilename(post.title) || `${post.blogId}-${post.logNo}`;
-  const categoryFolder = safeFilename(post.categoryName) || "미분류";
-  const postDir = path.join(dest, categoryFolder, postFolderName);
+  const postFolderName =
+    safeFilename(post.title) ||
+    `${post.blogId}-${post.logNo}`;
 
-  fs.mkdirSync(postDir, { recursive: true });
+  const categoryFolder =
+    safeFilename(post.categoryName) ||
+    "미분류";
 
-  // 이미지 / 썸네일 저장
-  post.markdown = await localizeImages(post.markdown, post.images, postDir);
+  const postDir = path.join(
+    dest,
+    categoryFolder,
+    postFolderName
+  );
 
-  // 네이버 동영상 / 동영상 썸네일 저장
-  post.markdown = await localizeVideos(post.markdown, post.videos, postDir);
+  fs.mkdirSync(postDir, {
+    recursive: true,
+  });
+
+  // 이미지 + 링크카드 썸네일
+  post.markdown = await localizeImages(
+    post.markdown,
+    post.images,
+    postDir
+  );
+
+  // 네이버 동영상 + 동영상 썸네일
+  post.markdown = await localizeVideos(
+    post.markdown,
+    post.videos,
+    postDir
+  );
 
   post.markdown = cleanMarkdown(post.markdown) + "\n";
 
-  const outputPath = path.join(postDir, "index.md");
+  const outputPath = path.join(
+    postDir,
+    "index.md"
+  );
 
-  fs.writeFileSync(outputPath, post.markdown, "utf8");
+  fs.writeFileSync(
+    outputPath,
+    post.markdown,
+    "utf8"
+  );
 
   console.log("");
   console.log(`완료: ${outputPath}`);
-  console.log(`이미지: ${post.images.filter((x) => x.type === "image").length}개`);
-  console.log(`링크 썸네일: ${post.images.filter((x) => x.type === "thumbnail").length}개`);
+
+  console.log(
+    `이미지: ${post.images.filter((x) => x.type === "image").length}개`
+  );
+
+  console.log(
+    `링크 썸네일: ${post.images.filter((x) => x.type === "thumbnail").length}개`
+  );
+
   console.log(`동영상: ${post.videos.length}개`);
   console.log(`글자 수: ${post.markdown.length}`);
 }
@@ -791,5 +878,6 @@ main().catch((error) => {
   console.error("");
   console.error("실패:", error.message);
   console.error(error.stack);
+
   process.exit(1);
 });
