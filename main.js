@@ -3,24 +3,18 @@ const path = require("path");
 const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-  "AppleWebKit/537.36 (KHTML, like Gecko) " +
-  "Chrome/152.0.0.0 Safari/537.36";
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
 
 function parsePostUrl(input) {
   const url = new URL(input);
   const parts = url.pathname.split("/").filter(Boolean);
 
-  if (parts.length >= 2 && /^\d+$/.test(parts[1])) {
-    return { blogId: parts[0], logNo: parts[1] };
-  }
+  if (parts.length >= 2 && /^\d+$/.test(parts[1])) return { blogId: parts[0], logNo: parts[1] };
 
   const blogId = url.searchParams.get("blogId");
   const logNo = url.searchParams.get("logNo");
 
   if (blogId && logNo) return { blogId, logNo };
-
   throw new Error(`지원하지 않는 네이버 블로그 URL: ${input}`);
 }
 
@@ -40,8 +34,15 @@ function escapeHtmlAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-// YouTube URL에서 시작 시간 추출
-// t=65 / t=65s / t=1m5s / t=1h2m3s / start=65 지원
+function escapeHtmlText(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// YouTube URL 시작 시간 추출
+// t=65 / t=65s / t=1m5s / t=1h2m3s / start=65
 function getYouTubeStartSeconds(inputUrl) {
   if (!inputUrl) return null;
 
@@ -49,16 +50,12 @@ function getYouTubeStartSeconds(inputUrl) {
     const url = new URL(inputUrl);
 
     const start = url.searchParams.get("start");
-    if (start && /^\d+$/.test(start)) {
-      return Number(start);
-    }
+    if (start && /^\d+$/.test(start)) return Number(start);
 
     const t = url.searchParams.get("t");
     if (!t) return null;
 
-    if (/^\d+s?$/.test(t)) {
-      return Number(t.replace(/s$/, ""));
-    }
+    if (/^\d+s?$/.test(t)) return Number(t.replace(/s$/, ""));
 
     const match = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
     if (!match) return null;
@@ -74,17 +71,11 @@ function getYouTubeStartSeconds(inputUrl) {
   }
 }
 
-// iframe에 start=초 추가
 function applyYouTubeStartTime(iframeHtml, startSeconds) {
-  if (!iframeHtml || !startSeconds || startSeconds <= 0) {
-    return iframeHtml;
-  }
+  if (!iframeHtml || !startSeconds || startSeconds <= 0) return iframeHtml;
 
   return iframeHtml.replace(/src="([^"]+)"/i, (whole, src) => {
-    // 이미 start가 있으면 그대로 유지
-    if (/[?&]start=\d+/i.test(src)) {
-      return whole;
-    }
+    if (/[?&]start=\d+/i.test(src)) return whole;
 
     const separator = src.includes("?") ? "&" : "?";
     return `src="${src}${separator}start=${startSeconds}"`;
@@ -95,31 +86,94 @@ function cleanMarkdown(markdown) {
   return markdown
     .replace(/\u200b/g, "")
     .replace(/[ \t]+\n/g, "\n")
-
-    // bullet list 사이 불필요한 빈 줄 제거
     .replace(/^([ \t]*[-*+] .+)\n{2,}(?=[ \t]*[-*+] )/gm, "$1\n")
     .replace(/^([ \t]*\\[-*+] .+)\n{2,}(?=[ \t]*\\[-*+] )/gm, "$1\n")
-
-    // 숫자 list 사이 불필요한 빈 줄 제거
     .replace(/^([ \t]*\d+\\?\. .+)\n{2,}(?=[ \t]*\d+\\?\. )/gm, "$1\n")
-
-    // 3개 이상의 연속 개행 → 2개로
+    .replace(/(?:<br>\s*){3,}/g, "<br>\n<br>\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
+function getImageExtension(contentType, imageUrl) {
+  const type = (contentType || "").split(";")[0].trim().toLowerCase();
+
+  switch (type) {
+    case "image/jpeg": return ".jpg";
+    case "image/png": return ".png";
+    case "image/gif": return ".gif";
+    case "image/webp": return ".webp";
+    case "image/bmp": return ".bmp";
+    case "image/svg+xml": return ".svg";
+    case "image/avif": return ".avif";
+  }
+
+  try {
+    const ext = path.extname(new URL(imageUrl).pathname).toLowerCase();
+
+    if ([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"].includes(ext)) {
+      return ext === ".jpeg" ? ".jpg" : ext;
+    }
+  } catch {}
+
+  return ".jpg";
+}
+
+// 일반 본문 이미지 → w2000
+function normalizePostImageUrl(src) {
+  if (!src) return null;
+  if (src.startsWith("data:") || src.startsWith("blob:")) return null;
+  if (src.startsWith("//")) src = `https:${src}`;
+
+  try {
+    const url = new URL(src);
+    url.searchParams.set("type", "w2000");
+    return url.toString();
+  } catch {
+    return src;
+  }
+}
+
+// OG 썸네일 → 네이버가 제공하는 썸네일 URL 그대로 사용
+function normalizeThumbnailUrl(src) {
+  if (!src) return null;
+  if (src.startsWith("data:") || src.startsWith("blob:")) return null;
+  if (src.startsWith("//")) src = `https:${src}`;
+
+  return src;
+}
+
+async function downloadImage(imageUrl, outputDir, number, type) {
+  const response = await fetch(imageUrl, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      Referer: "https://blog.naver.com/",
+    },
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+
+  const contentType = response.headers.get("content-type") || "";
+  const extension = getImageExtension(contentType, imageUrl);
+  const prefix = type === "thumbnail" ? "thumb" : "image";
+  const filename = `${prefix}-${String(number).padStart(3, "0")}${extension}`;
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.writeFileSync(path.join(outputDir, filename), buffer);
+
+  return { filename, size: buffer.length };
+}
+
 function normalizeNaverHtml($, content) {
-  // YouTube oEmbed 처리
+  const images = [];
+
+  // YouTube oEmbed
   content.find(".se-component.se-oembed").each((_, el) => {
     const $component = $(el);
     const $data = $component.find("script.__se_module_data").first();
 
     if (!$data.length) return;
 
-    const raw =
-      $data.attr("data-module-v2") ||
-      $data.attr("data-module");
-
+    const raw = $data.attr("data-module-v2") || $data.attr("data-module");
     if (!raw) return;
 
     let moduleData;
@@ -134,42 +188,123 @@ function normalizeNaverHtml($, content) {
     const data = moduleData.data;
     if (!data || data.providerName !== "YouTube") return;
 
-    // inputUrl은 시작 시간 확인용으로만 사용
-    // 실제 링크는 본문에 원래 존재하는 <a>를 보존
     const inputUrl = data.inputUrl || "";
-
     let iframeHtml = data.html || "";
+
     if (!iframeHtml) return;
 
-    // t=65s 등이 있으면 iframe에 start=65 적용
     const startSeconds = getYouTubeStartSeconds(inputUrl);
     iframeHtml = applyYouTubeStartTime(iframeHtml, startSeconds);
 
-    // Turndown으로부터 iframe 보호
     const encodedIframe = Buffer.from(iframeHtml, "utf8").toString("base64");
-
-    $component.replaceWith(
-      `NAVEROEMBEDSTART${encodedIframe}NAVEROEMBEDEND`
-    );
+    $component.replaceWith(`NAVEROEMBEDSTART${encodedIframe}NAVEROEMBEDEND`);
   });
 
-  // oEmbed 처리 후 불필요 요소 제거
+  // OG 링크 미리보기 → table 카드
+  content.find(".se-component.se-oglink").each((_, el) => {
+    const $component = $(el);
+    const $link = $component.find("a[href]").first();
+    const href = $link.attr("href");
+
+    if (!href) {
+      $component.remove();
+      return;
+    }
+
+    const title =
+      $component.find(".se-oglink-title").first().text().trim() ||
+      $component.find("strong").first().text().trim() ||
+      href;
+
+    const description =
+      $component.find(".se-oglink-summary").first().text().trim() ||
+      $component.find(".se-oglink-description").first().text().trim() ||
+      "";
+
+    let domain =
+      $component.find(".se-oglink-url").first().text().trim() ||
+      $component.find(".se-oglink-domain").first().text().trim();
+
+    if (!domain) {
+      try {
+        domain = new URL(href).hostname.replace(/^www\./, "");
+      } catch {
+        domain = "";
+      }
+    }
+
+    // OG 썸네일
+    const $img = $component.find("img").first();
+    let imageSrc = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
+    let imageToken = null;
+
+    imageSrc = normalizeThumbnailUrl(imageSrc);
+
+    if (imageSrc) {
+      const index = images.length;
+      imageToken = `NAVERIMAGE${index}END`;
+
+      images.push({
+        token: imageToken,
+        url: imageSrc,
+        type: "thumbnail",
+      });
+    }
+
+    const safeHref = escapeHtmlAttribute(href);
+    const safeTitle = escapeHtmlText(title);
+    const safeDescription = escapeHtmlText(description);
+    const safeDomain = escapeHtmlText(domain);
+
+    let infoHtml = `<a href="${safeHref}" target="_blank"><strong>${safeTitle}</strong></a>`;
+
+    if (safeDescription) infoHtml += `<br><br><span>${safeDescription}</span>`;
+    if (safeDomain) infoHtml += `<br><br><small>${safeDomain}</small>`;
+
+    let cardHtml;
+
+    if (imageToken) {
+      cardHtml =
+        `<table>` +
+        `<tbody><tr>` +
+        `<td width="180" valign="middle"><a href="${safeHref}" target="_blank"><img src="${imageToken}" width="180"></a></td>` +
+        `<td valign="middle">${infoHtml}</td>` +
+        `</tr></tbody>` +
+        `</table>`;
+    } else {
+      cardHtml =
+        `<table>` +
+        `<tbody><tr>` +
+        `<td>${infoHtml}</td>` +
+        `</tr></tbody>` +
+        `</table>`;
+    }
+
+    const encodedCard = Buffer.from(cardHtml, "utf8").toString("base64");
+    $component.replaceWith(`NAVEROGCARDSTART${encodedCard}NAVEROGCARDEND`);
+  });
+
+  // 불필요 요소 제거
   content.find("script, style, noscript").remove();
 
-  // 이미지 원본 URL 정리
+  // 일반 본문 이미지
   content.find("img").each((_, img) => {
     const $img = $(img);
+    let src = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
 
-    let src =
-      $img.attr("data-lazy-src") ||
-      $img.attr("data-src") ||
-      $img.attr("src");
-
+    src = normalizePostImageUrl(src);
     if (!src) return;
 
-    src = src.replace(/\?type=[^&]+.*$/, "");
+    const index = images.length;
+    const token = `NAVERIMAGE${index}END`;
 
-    $img.attr("src", src);
+    images.push({
+      token,
+      url: src,
+      type: "image",
+    });
+
+    $img.attr("src", token);
     $img.removeAttr("data-lazy-src");
     $img.removeAttr("data-src");
   });
@@ -183,6 +318,8 @@ function normalizeNaverHtml($, content) {
       $a.replaceWith($a.contents());
     }
   });
+
+  return images;
 }
 
 function createTurndown() {
@@ -207,13 +344,8 @@ function createTurndown() {
       const target = node.getAttribute("target");
       const title = node.getAttribute("title");
 
-      if (target) {
-        attrs += ` target="${escapeHtmlAttribute(target)}"`;
-      }
-
-      if (title) {
-        attrs += ` title="${escapeHtmlAttribute(title)}"`;
-      }
+      if (target) attrs += ` target="${escapeHtmlAttribute(target)}"`;
+      if (title) attrs += ` title="${escapeHtmlAttribute(title)}"`;
 
       return `<a ${attrs}>${content}</a>`;
     },
@@ -240,18 +372,12 @@ function createTurndown() {
       if (!text) return "";
 
       switch (size) {
-        case 13:
-          return text;
-        case 15:
-          return `\n\n#### ${text}\n\n`;
-        case 16:
-          return `\n\n### ${text}\n\n`;
-        case 19:
-          return `\n\n## ${text}\n\n`;
-        case 24:
-          return `\n\n# ${text}\n\n`;
-        default:
-          return `<span style="font-size:${size}px">${text}</span>`;
+        case 13: return text;
+        case 15: return `\n\n#### ${text}\n\n`;
+        case 16: return `\n\n### ${text}\n\n`;
+        case 19: return `\n\n## ${text}\n\n`;
+        case 24: return `\n\n# ${text}\n\n`;
+        default: return `<span style="font-size:${size}px">${text}</span>`;
       }
     },
   });
@@ -261,15 +387,8 @@ function createTurndown() {
     filter: "img",
 
     replacement(content, node) {
-      let src =
-        node.getAttribute("data-lazy-src") ||
-        node.getAttribute("data-src") ||
-        node.getAttribute("src");
-
+      const src = node.getAttribute("src");
       if (!src) return "";
-
-      src = src.replace(/\?type=[^&]+.*$/, "");
-      src += "?type=w2000";
 
       return `\n\n![](${src})\n\n`;
     },
@@ -288,10 +407,7 @@ function createTurndown() {
     replacement(content) {
       const text = content.replace(/\u200b/g, "").trim();
 
-      if (!text) {
-        return "\nNAVEREMPTYLINE\n";
-      }
-
+      if (!text) return "\nNAVEREMPTYLINE\n";
       return `${text}\n`;
     },
   });
@@ -300,44 +416,76 @@ function createTurndown() {
 }
 
 // 네이버 빈 문단 복원
+// 연속 빈 문단은 <br> 최대 2개
 function restoreEmptyLines(markdown) {
-  return markdown.replace(
-    /(?:\s*NAVEREMPTYLINE\s*)+/g,
-    (match) => {
-      const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
+  return markdown.replace(/(?:\s*NAVEREMPTYLINE\s*)+/g, (match) => {
+    const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
 
-      if (count === 1) {
-        return "\n\n";
-      }
+    if (count === 1) return "\n\n";
+    if (count === 2) return "\n\n<br>\n\n";
 
-      if (count === 2) {
-        return "\n\n<br>\n\n";
-      }
-
-      if (count === 3) {
-        return "\n\n<br>\n<br>\n<br>\n\n";
-      }
-
-      return "\n\n" + "<br>\n".repeat(count) + "\n";
-    }
-  );
+    return "\n\n<br>\n<br>\n\n";
+  });
 }
 
-// oEmbed에서는 iframe만 복원
-// 링크는 원래 본문의 <a> 사용
+// YouTube iframe 복원
 function restoreOEmbed(markdown) {
-  return markdown.replace(
-    /NAVEROEMBEDSTART([A-Za-z0-9+/=]+)NAVEROEMBEDEND/g,
-    (_, encodedIframe) => {
-      try {
-        const iframeHtml = Buffer.from(encodedIframe, "base64").toString("utf8");
-        return `\n\n${iframeHtml}\n\n`;
-      } catch (error) {
-        console.warn("oEmbed 복원 실패:", error.message);
-        return "";
-      }
+  return markdown.replace(/NAVEROEMBEDSTART([A-Za-z0-9+/=]+)NAVEROEMBEDEND/g, (_, encodedIframe) => {
+    try {
+      const iframeHtml = Buffer.from(encodedIframe, "base64").toString("utf8");
+      return `\n\n${iframeHtml}\n\n`;
+    } catch (error) {
+      console.warn("oEmbed 복원 실패:", error.message);
+      return "";
     }
-  );
+  });
+}
+
+// OG 카드 복원
+function restoreOgCards(markdown) {
+  return markdown.replace(/NAVEROGCARDSTART([A-Za-z0-9+/=]+)NAVEROGCARDEND/g, (_, encodedCard) => {
+    try {
+      const cardHtml = Buffer.from(encodedCard, "base64").toString("utf8");
+      return `\n\n${cardHtml}\n\n`;
+    } catch (error) {
+      console.warn("OG 카드 복원 실패:", error.message);
+      return "";
+    }
+  });
+}
+
+// 이미지 + 썸네일 다운로드
+// image / thumbnail 번호는 각각 따로 증가
+async function localizeImages(markdown, images, outputDir) {
+  let result = markdown;
+  let imageNumber = 0;
+  let thumbnailNumber = 0;
+
+  for (const image of images) {
+    let number;
+
+    if (image.type === "thumbnail") {
+      thumbnailNumber++;
+      number = thumbnailNumber;
+    } else {
+      imageNumber++;
+      number = imageNumber;
+    }
+
+    try {
+      const downloaded = await downloadImage(image.url, outputDir, number, image.type);
+
+      console.log(`${image.type === "thumbnail" ? "썸네일" : "이미지"}: ${downloaded.filename} (${downloaded.size} bytes)`);
+      result = result.replaceAll(image.token, downloaded.filename);
+    } catch (error) {
+      console.warn(`${image.type === "thumbnail" ? "썸네일" : "이미지"} 다운로드 실패: ${image.url}`);
+      console.warn(`  ${error.message}`);
+
+      result = result.replaceAll(image.token, image.url);
+    }
+  }
+
+  return result;
 }
 
 async function getPost(inputUrl) {
@@ -357,9 +505,7 @@ async function getPost(inputUrl) {
     },
   });
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  }
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
 
   const html = await response.text();
   const $ = cheerio.load(html);
@@ -373,35 +519,44 @@ async function getPost(inputUrl) {
 
   title = title.replace(/\s*:\s*네이버 블로그\s*$/, "").trim();
 
+  // 카테고리
+  const categoryLink = $(".blog2_series a").first();
+  let categoryName = categoryLink.text().trim();
+  let categoryNo = null;
+
+  const categoryHref = categoryLink.attr("href");
+
+  if (categoryHref) {
+    try {
+      const categoryUrl = new URL(categoryHref, "https://blog.naver.com");
+      categoryNo = categoryUrl.searchParams.get("categoryNo");
+    } catch {
+      categoryNo = null;
+    }
+  }
+
+  if (!categoryName) categoryName = "미분류";
+
+  console.log(`카테고리: ${categoryName}${categoryNo ? ` (${categoryNo})` : ""}`);
+
   // 본문
   let content = $(".se-main-container").first();
 
-  if (!content.length) {
-    content = $("#postViewArea").first();
-  }
+  if (!content.length) content = $("#postViewArea").first();
+  if (!content.length) content = $(".se3_view").first();
+  if (!content.length) throw new Error("본문 영역을 찾지 못했습니다.");
 
-  if (!content.length) {
-    content = $(".se3_view").first();
-  }
-
-  if (!content.length) {
-    throw new Error("본문 영역을 찾지 못했습니다.");
-  }
-
-  normalizeNaverHtml($, content);
+  const images = normalizeNaverHtml($, content);
 
   const turndown = createTurndown();
   let bodyMarkdown = turndown.turndown(content.html() || "");
 
-  // 1차 정리
   bodyMarkdown = restoreEmptyLines(bodyMarkdown);
   bodyMarkdown = cleanMarkdown(bodyMarkdown);
 
-  // iframe 복원
   bodyMarkdown = restoreOEmbed(bodyMarkdown);
+  bodyMarkdown = restoreOgCards(bodyMarkdown);
 
-  // 2차 정리
-  // iframe 복원 과정에서 생긴 3개 이상의 연속 개행도 제거
   bodyMarkdown = cleanMarkdown(bodyMarkdown);
 
   const markdown = [
@@ -417,7 +572,10 @@ async function getPost(inputUrl) {
     title,
     blogId,
     logNo,
+    categoryName,
+    categoryNo,
     markdown,
+    images,
   };
 }
 
@@ -430,11 +588,18 @@ async function main() {
     process.exit(1);
   }
 
-  fs.mkdirSync(dest, { recursive: true });
-
   const post = await getPost(inputUrl);
-  const filename = safeFilename(post.title) || `${post.blogId}-${post.logNo}`;
-  const outputPath = path.join(dest, `${filename}.md`);
+
+  const postFolderName = safeFilename(post.title) || `${post.blogId}-${post.logNo}`;
+  const categoryFolder = safeFilename(post.categoryName) || "미분류";
+  const postDir = path.join(dest, categoryFolder, postFolderName);
+
+  fs.mkdirSync(postDir, { recursive: true });
+
+  post.markdown = await localizeImages(post.markdown, post.images, postDir);
+  post.markdown = cleanMarkdown(post.markdown) + "\n";
+
+  const outputPath = path.join(postDir, "index.md");
 
   fs.writeFileSync(outputPath, post.markdown, "utf8");
 
