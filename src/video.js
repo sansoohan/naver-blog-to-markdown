@@ -1,16 +1,47 @@
+// src/video.js
+
 const fs = require("fs");
 const path = require("path");
 
-function getExtension(url, contentType = "") {
-  const ext = path.extname(String(url).split("?")[0]).toLowerCase();
+function safeFilename(value, fallback) {
+  let filename;
 
-  if (/^\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(ext)) return ext === ".jpeg" ? ".jpg" : ext;
-  if (/video\/mp4/i.test(contentType)) return ".mp4";
-  if (/image\/png/i.test(contentType)) return ".png";
-  if (/image\/gif/i.test(contentType)) return ".gif";
-  if (/image\/webp/i.test(contentType)) return ".webp";
+  try {
+    filename = decodeURIComponent(String(value));
+  } catch {
+    filename = String(value);
+  }
 
-  return ".jpg";
+  filename = filename
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .trim();
+
+  return filename || fallback;
+}
+
+function getFilenameFromUrl(url, fallback) {
+  try {
+    const filename = path.posix.basename(new URL(url).pathname);
+    return safeFilename(filename, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getUniqueFilename(outputDir, filename) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+
+  let result = filename;
+  let index = 2;
+
+  while (fs.existsSync(path.join(outputDir, result))) {
+    result = `${base}_${index}${ext}`;
+    index++;
+  }
+
+  return result;
 }
 
 async function downloadFile(url, outputPath) {
@@ -25,11 +56,6 @@ async function downloadFile(url, outputPath) {
 
   const buffer = Buffer.from(await response.arrayBuffer());
   fs.writeFileSync(outputPath, buffer);
-
-  return {
-    contentType: response.headers.get("content-type") || "",
-    size: buffer.length,
-  };
 }
 
 function parseYouTubeStart(value) {
@@ -66,9 +92,7 @@ function getYouTubeId(value) {
 function makeYouTubeIframe(id, start = 0) {
   const src = `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ""}`;
 
-  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" `
-    + `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" `
-    + `allowfullscreen></iframe>`;
+  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
 }
 
 function protectYouTube($, root, store) {
@@ -111,11 +135,17 @@ function findVideoMetadata(value) {
 
 async function fetchVideoInfo(vid, inKey) {
   const params = new URLSearchParams({ vid });
+
   if (inKey) params.set("inKey", inKey);
 
   const response = await fetch(
     `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${vid}?${params}`,
-    { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/" } },
+    {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Referer: "https://blog.naver.com/",
+      },
+    }
   );
 
   if (!response.ok) throw new Error(`Naver VOD API 실패: ${response.status}`);
@@ -140,21 +170,25 @@ function findBestMp4(data) {
     const type = value.type || value.mimeType || value.mime || "";
 
     if (
-      typeof src === "string"
-      && src.startsWith("http")
-      && (/\.mp4(?:\?|$)/i.test(src) || /video\/mp4/i.test(type))
+      typeof src === "string" &&
+      src.startsWith("http") &&
+      (/\.mp4(?:\?|$)/i.test(src) || /video\/mp4/i.test(type))
     ) {
       const width = Number(value.width || value.encodingWidth || value.videoWidth || 0);
       const height = Number(value.height || value.encodingHeight || value.videoHeight || 0);
       const bitrate = Number(value.bitrate || value.videoBitrate || 0);
 
-      results.push({ src, score: width * height * 1000000 + bitrate });
+      results.push({
+        src,
+        score: width * height * 1000000 + bitrate,
+      });
     }
 
     Object.values(value).forEach(walk);
   }
 
   walk(data);
+
   results.sort((a, b) => b.score - a.score);
 
   return results[0]?.src || "";
@@ -175,10 +209,10 @@ function findPoster(data) {
 
     for (const [key, child] of Object.entries(value)) {
       if (
-        typeof child === "string"
-        && child.startsWith("http")
-        && /thumbnail|poster|cover/i.test(key)
-        && /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)
+        typeof child === "string" &&
+        child.startsWith("http") &&
+        /thumbnail|poster|cover/i.test(key) &&
+        /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)
       ) {
         result = child;
         return;
@@ -189,11 +223,13 @@ function findPoster(data) {
   }
 
   walk(data);
+
   return result;
 }
 
-async function protectNaverVideos($, root, outputDir, store) {
+async function protectNaverVideos($, root, outputDir, store, imageManager) {
   let index = 1;
+  const downloadedVideos = new Map();
 
   for (const element of root.find(".se-video, .se-component.se-video").toArray()) {
     const component = $(element);
@@ -204,6 +240,7 @@ async function protectNaverVideos($, root, outputDir, store) {
       const raw = node.attr("data-module-v2") || node.attr("data-module") || node.html() || "";
 
       metadata = findVideoMetadata(raw);
+
       if (metadata) break;
     }
 
@@ -217,31 +254,35 @@ async function protectNaverVideos($, root, outputDir, store) {
       if (!videoUrl) continue;
 
       const number = String(index).padStart(3, "0");
-      const videoFilename = `video-${number}.mp4`;
+      let videoFilename;
 
-      await downloadFile(videoUrl, path.join(outputDir, videoFilename));
+      if (downloadedVideos.has(videoUrl)) {
+        videoFilename = downloadedVideos.get(videoUrl);
+      } else {
+        videoFilename = getFilenameFromUrl(videoUrl, `video-${number}.mp4`);
+        videoFilename = getUniqueFilename(outputDir, videoFilename);
+
+        await downloadFile(videoUrl, path.join(outputDir, videoFilename));
+        downloadedVideos.set(videoUrl, videoFilename);
+      }
 
       let poster = "";
       const posterUrl = findPoster(info);
 
       if (posterUrl) {
-        const temp = path.join(outputDir, `video-thumb-${number}.tmp`);
-
         try {
-          const result = await downloadFile(posterUrl, temp);
-          const filename = `video-thumb-${number}${getExtension(posterUrl, result.contentType)}`;
+          const posterFilename = await imageManager.download(posterUrl, {
+            fallbackPrefix: "video-thumb",
+          });
 
-          fs.renameSync(temp, path.join(outputDir, filename));
-          poster = ` poster="${filename}"`;
-        } catch {
-          if (fs.existsSync(temp)) fs.unlinkSync(temp);
-        }
+          if (posterFilename) poster = ` poster="${posterFilename}"`;
+        } catch {}
       }
 
-      const html = `<video controls style="width:100%; height:auto;"${poster}>`
-        + `<source src="${videoFilename}" type="video/mp4"></video>`;
+      const html = `<video controls style="width:100%;height:auto;"${poster}><source src="${videoFilename}" type="video/mp4"></video>`;
 
       component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+
       index++;
     } catch {
       console.warn(`동영상 다운로드 실패: ${metadata.vid}`);

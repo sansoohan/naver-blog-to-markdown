@@ -4,12 +4,11 @@ const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
 const { protectTextComponents } = require("./src/paragraph");
-const { localizeImages } = require("./src/image");
 const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
 const { protectQuotes } = require("./src/quote");
 const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
-const { protectCodeBlocks } = require("./src/code");
+const { createImageManager, localizeImages, getImageSource } = require("./src/image");
 
 function parsePostUrl(url) {
   const parsed = new URL(url);
@@ -70,17 +69,6 @@ function createStore() {
   };
 }
 
-function getExtension(url, fallback = ".jpg") {
-  try {
-    const pathname = new URL(url).pathname;
-    const ext = path.extname(pathname);
-
-    if (ext && ext.length <= 6) return ext.toLowerCase();
-  } catch {}
-
-  return fallback;
-}
-
 function createTurndown() {
   const turndown = new TurndownService({
     headingStyle: "atx",
@@ -114,8 +102,7 @@ function restoreEmptyLines(markdown) {
   return String(markdown)
     .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
     .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
-    .replace(/NAVEREMPTYLINE/g, "<br>")
-    .replace(/<br>[ \t]*\n(?=```)/g, "<br>\n\n");
+    .replace(/NAVEREMPTYLINE/g, "<br>");
 }
 
 function cleanMarkdown(markdown) {
@@ -126,22 +113,7 @@ function cleanMarkdown(markdown) {
     .trim();
 }
 
-async function downloadFile(url, destination) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://blog.naver.com/",
-    },
-  });
-
-  if (!response.ok) throw new Error(`다운로드 실패: ${response.status} ${url}`);
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(destination, buffer);
-}
-
-async function protectOgCards($, root, outputDir, store) {
-  let thumbIndex = 0;
+async function protectOgCards($, root, imageManager, store) {
   const cards = root.find(".se-component.se-oglink").toArray();
 
   for (const element of cards) {
@@ -154,23 +126,18 @@ async function protectOgCards($, root, outputDir, store) {
     const domain = component.find(".se-oglink-url").first().text().trim();
 
     const image = component.find("img").first();
-    const imageSource = image.length ? image.attr("data-lazy-src") || image.attr("data-src") || image.attr("src") || "" : "";
+    const imageSource = image.length ? getImageSource(image) : "";
 
     let thumbnail = "";
 
     if (imageSource) {
-      thumbIndex++;
-
-      const ext = getExtension(imageSource);
-      const filename = `thumb-${String(thumbIndex).padStart(3, "0")}${ext}`;
-      const destination = path.join(outputDir, filename);
-
       try {
-        await downloadFile(imageSource, destination);
-        thumbnail = `./${filename}`;
-      } catch {
-        thumbIndex--;
-      }
+        const filename = await imageManager.download(imageSource, {
+          fallbackPrefix: "thumb",
+        });
+
+        if (filename) thumbnail = `./${filename}`;
+      } catch {}
     }
 
     const imageHtml = thumbnail
@@ -246,9 +213,12 @@ async function convertPost(url) {
   const root = getPostRoot($);
   const store = createStore();
 
-  await protectNaverVideos($, root, outputDir, store);
-  await protectOgCards($, root, outputDir, store);
-  await localizeImages($, root, outputDir);
+  // 게시글 하나에서 사용하는 모든 이미지가 이 manager를 공유한다.
+  const imageManager = createImageManager(outputDir);
+
+  await protectNaverVideos($, root, outputDir, store, imageManager);
+  await protectOgCards($, root, imageManager, store);
+  await localizeImages($, root, imageManager);
 
   protectYouTube($, root, store);
   protectTables($, root, store);
@@ -256,7 +226,6 @@ async function convertPost(url) {
 
   const horizontalLineTypes = protectHorizontalLines($, root, store);
 
-  protectCodeBlocks($, root, store);
   protectTextComponents($, root, store);
 
   const turndown = createTurndown();
