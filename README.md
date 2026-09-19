@@ -4,7 +4,7 @@
 
 단순히 본문 텍스트만 Markdown으로 바꾸는 것이 아니라, **SmartEditor ONE의 문서 구조와 서식을 가능한 한 유지하는 것**을 목표로 합니다.
 
-텍스트 스타일, 이미지, 표, 인용구, 구분선, 소스코드, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석하여 Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소는 HTML/CSS를 사용해 보존합니다.
+텍스트 스타일, 이미지, 첨부파일, 표, 인용구, 구분선, 소스코드, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석하여 Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소는 HTML/CSS를 사용해 보존합니다.
 
 ---
 
@@ -31,13 +31,9 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 ```markdown
 **굵게**
-
 *기울임*
-
 ~~취소선~~
-
 [링크](https://example.com)
-
 - [ ] 체크박스
 ```
 
@@ -45,9 +41,7 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 ```html
 <u>밑줄</u>
-
 <span style="color:#ff0000">빨간 글자</span>
-
 <span style="font-size:11px">11px 글자</span>
 ```
 
@@ -80,27 +74,85 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 가능한 경우 네이버의 고해상도 이미지(`w2000`)를 가져오며, 원문의 표시 너비도 함께 보존합니다.
 
+가능한 경우 원본 URL의 실제 파일명을 유지합니다.
+
 ```text
 output/
 └── 카테고리/
-    └── 게시글 제목/
+    └── 글번호_게시글 제목/
         ├── index.md
-        ├── image-001.jpg
-        ├── image-002.png
-        └── image-003.jpg
+        ├── photo.jpg
+        ├── image.png
+        └── ...
+```
+
+같은 이미지 URL이 게시글 안에서 여러 번 사용되는 경우에는 한 번만 다운로드하고 동일한 로컬 파일을 재사용합니다.
+
+본문 이미지뿐 아니라 OG 링크 카드 썸네일과 네이버 동영상 썸네일도 같은 이미지 캐시를 사용합니다. 따라서 서로 다른 컴포넌트가 동일한 이미지 URL을 사용하는 경우에도 중복 다운로드하지 않습니다.
+
+서로 다른 이미지가 같은 파일명을 사용하는 경우에는 파일이 덮어써지지 않도록 자동으로 번호를 붙입니다.
+
+```text
+photo.jpg
+photo_2.jpg
+photo_3.jpg
 ```
 
 Markdown/HTML에서는 로컬 파일을 참조합니다.
 
 ```markdown
-![](./image-001.jpg)
+![](./photo.jpg)
 ```
 
 표시 크기가 필요한 경우:
 
 ```html
-<img src="./image-001.jpg" style="width:640px;max-width:100%;height:auto;">
+<img src="./photo.jpg" style="width:640px;max-width:100%;height:auto;">
 ```
+
+---
+
+### 📎 Attachments
+
+게시글에 첨부된 파일을 **로컬 파일로 다운로드**합니다.
+
+첨부파일은 이미지나 동영상과 파일명이 충돌하지 않도록 게시글 폴더 내부의 `download/` 폴더에 별도로 저장합니다.
+
+```text
+글번호_게시글 제목/
+├── index.md
+├── photo.jpg
+├── video.mp4
+└── download/
+    ├── 자료.zip
+    ├── 문서.pdf
+    └── 데이터.xlsx
+```
+
+가능한 경우 원래 첨부파일명을 유지하며, 서버가 `Content-Disposition`을 통해 파일명을 제공하는 경우 해당 파일명을 사용합니다.
+
+같은 첨부파일 URL이 여러 번 나타나는 경우에는 한 번만 다운로드합니다.
+
+서로 다른 첨부파일이 같은 파일명을 사용하는 경우에는 자동으로 번호를 붙여 덮어쓰기를 방지합니다.
+
+```text
+자료.zip
+자료_2.zip
+자료_3.zip
+```
+
+Markdown에서는 첨부파일을 클릭할 수 있는 하나의 박스로 표시합니다.
+
+```html
+<a href="./download/자료.zip" style="...">
+  <span>📎</span>
+  <strong>자료.zip</strong>
+</a>
+```
+
+파일 크기 정보를 확인할 수 있는 경우에는 파일명과 함께 표시합니다.
+
+첨부파일이 없는 게시글에서는 `download/` 폴더를 만들지 않습니다.
 
 ---
 
@@ -169,6 +221,8 @@ SmartEditor ONE에 삽입된 YouTube 영상을 보존합니다.
 
 VOD 정보를 조회하여 사용할 수 있는 MP4 중 높은 품질의 영상을 선택하고, 썸네일도 함께 저장합니다.
 
+가능한 경우 실제 미디어 URL의 파일명을 유지하며, 파일명이 없는 경우에는 자동 생성된 이름을 사용합니다.
+
 ```text
 video-001.mp4
 video-thumb-001.jpg
@@ -177,10 +231,14 @@ video-thumb-001.jpg
 Markdown에는 HTML5 `<video>`로 삽입합니다.
 
 ```html
-<video controls style="width:100%; height:auto;" poster="./video-thumb-001.jpg">
+<video controls style="width:100%;height:auto;" poster="./video-thumb-001.jpg">
   <source src="./video-001.mp4" type="video/mp4">
 </video>
 ```
+
+동일한 동영상 URL이 여러 번 사용되는 경우에는 MP4 파일을 다시 다운로드하지 않고 기존 로컬 파일을 재사용합니다.
+
+동영상 썸네일은 일반 이미지와 동일한 이미지 캐시를 사용합니다.
 
 ---
 
@@ -199,6 +257,8 @@ Markdown에는 HTML5 `<video>`로 삽입합니다.
 ```text
 thumb-001.jpg
 ```
+
+동일한 이미지가 본문이나 다른 컴포넌트에서도 사용되는 경우에는 이미 다운로드된 로컬 파일을 재사용합니다.
 
 Markdown만으로 카드 UI를 표현하기 어려우므로 간단한 HTML table 형태로 변환합니다.
 
@@ -271,10 +331,20 @@ line7
 대신 네이버의 실제 스타일 정보를 기반으로 HTML/CSS 형태로 보존합니다.
 
 ```html
-<div class="naver-hr naver-hr-line3" data-naver-line-type="line3">
+<div class="naver-hr naver-hr-line3 naver-hr-left" data-naver-line-type="line3" data-naver-align="left">
   ...
 </div>
 ```
+
+구분선의 정렬 정보도 함께 보존합니다.
+
+```text
+left
+center
+right
+```
+
+SmartEditor에서 별도의 정렬값이 지정되지 않은 구분선은 왼쪽 정렬로 처리합니다.
 
 게시글에 실제로 사용된 구분선 타입의 CSS만 Markdown에 포함됩니다.
 
@@ -288,15 +358,10 @@ Markdown으로 표현할 수 있는 것은 Markdown을 사용합니다.
 
 ```markdown
 **bold**
-
 *italic*
-
 ~~strike~~
-
 [link](URL)
-
 # heading
-
 - [ ] task
 ```
 
@@ -312,13 +377,9 @@ Markdown으로 정확하게 표현할 수 없는 경우에만 HTML을 사용합�
 
 ```html
 <u>underline</u>
-
 <span style="color:...">...</span>
-
 <table>...</table>
-
 <iframe ...></iframe>
-
 <video ...></video>
 ```
 
@@ -337,7 +398,6 @@ Markdown으로 정확하게 표현할 수 없는 경우에만 HTML을 사용합�
 
 ```bash
 git clone https://github.com/sansoohan/naver-blog-to-markdown.git
-
 cd naver-blog-to-markdown
 ```
 
@@ -375,17 +435,23 @@ https://blog.naver.com/BLOG_ID/LOG_NO
 
 변환 결과는 기본적으로 `output` 폴더 아래에 저장됩니다.
 
+각 게시글 폴더명 앞에는 네이버의 고유 게시글 번호(`logNo`)가 붙습니다.
+
 ```text
 output/
 └── 카테고리/
-    └── 게시글 제목/
+    └── LOG_NO_게시글 제목/
         ├── index.md
-        ├── image-001.jpg
-        ├── image-002.jpg
-        ├── thumb-001.jpg
-        ├── video-001.mp4
-        └── video-thumb-001.jpg
+        ├── photo.jpg
+        ├── image.png
+        ├── thumb.jpg
+        ├── video.mp4
+        └── download/
+            ├── 자료.zip
+            └── 문서.pdf
 ```
+
+게시글 번호를 폴더명에 포함하기 때문에 제목이 같은 게시글도 서로 충돌하지 않으며, 같은 게시글을 다시 변환할 때 어떤 폴더에 대응하는지 쉽게 확인할 수 있습니다.
 
 `index.md` 상단에는 게시글 제목과 원본 주소가 기록됩니다.
 
@@ -407,6 +473,7 @@ output/
 naver-blog-to-markdown/
 ├── main.js
 ├── src/
+│   ├── attachment.js
 │   ├── paragraph.js
 │   ├── image.js
 │   ├── table.js
@@ -419,16 +486,17 @@ naver-blog-to-markdown/
 └── README.md
 ```
 
-| File                 | Role                          |
-| -------------------- | ----------------------------- |
-| `main.js`            | 게시글 가져오기 및 전체 변환 흐름           |
-| `paragraph.js`       | 텍스트, 글자 크기, 인라인 서식, 링크, 체크박스  |
-| `image.js`           | 이미지 다운로드, 고해상도 이미지 및 표시 크기 처리 |
-| `table.js`           | Markdown/HTML 표 변환            |
-| `quote.js`           | 네이버 인용구 카드                    |
-| `horizontal-line.js` | 네이버 구분선                       |
-| `video.js`           | YouTube 및 네이버 동영상             |
-| `code.js`            | 네이버 소스코드 컴포넌트 및 디자인 클래스 변환    |
+| File                 | Role                                 |
+| -------------------- | ------------------------------------ |
+| `main.js`            | 게시글 가져오기 및 전체 변환 흐름                  |
+| `attachment.js`      | 첨부파일 탐지, 다운로드 및 로컬 링크 변환             |
+| `paragraph.js`       | 텍스트, 글자 크기, 인라인 서식, 링크, 체크박스         |
+| `image.js`           | 이미지 다운로드, 중복 방지, 고해상도 이미지 및 표시 크기 처리 |
+| `table.js`           | Markdown/HTML 표 변환                   |
+| `quote.js`           | 네이버 인용구 카드                           |
+| `horizontal-line.js` | 네이버 구분선 타입 및 정렬 보존                   |
+| `video.js`           | YouTube 및 네이버 동영상                    |
+| `code.js`            | 네이버 소스코드 컴포넌트 및 디자인 클래스 변환           |
 
 ---
 
@@ -438,13 +506,10 @@ naver-blog-to-markdown/
 
 ```html
 <span>
-
 <table>
-
+<a>
 <iframe>
-
 <video>
-
 <style>
 ```
 
@@ -458,7 +523,7 @@ code...
 
 따라서 사용하는 Markdown 뷰어에 따라 일부 요소의 표시 결과가 달라질 수 있습니다.
 
-특히 YouTube iframe, `<video>`, `<style>`, HTML table, inline CSS, 소스코드의 네이버 디자인 클래스 등은 Markdown 뷰어의 HTML/WebView 및 Markdown 확장 문법 지원 수준에 영향을 받을 수 있습니다.
+특히 YouTube iframe, `<video>`, `<style>`, HTML table, inline CSS, 첨부파일 링크, 소스코드의 네이버 디자인 클래스 등은 Markdown 뷰어의 HTML/WebView 및 Markdown 확장 문법 지원 수준에 영향을 받을 수 있습니다.
 
 ---
 
@@ -474,9 +539,13 @@ Markdown으로 표현할 수 있는 요소를 불필요하게 HTML로 변환하�
 
 ### 3. 로컬 백업
 
-이미지와 동영상 등 중요한 미디어를 가능한 한 로컬에 저장하여 네이버의 원격 리소스에 대한 의존성을 줄입니다.
+이미지, 동영상, 첨부파일 등 중요한 파일을 가능한 한 로컬에 저장하여 네이버의 원격 리소스에 대한 의존성을 줄입니다.
 
-### 4. 원본 정보 보존
+### 4. 중복 파일 최소화
+
+동일한 URL의 이미지, 썸네일, 동영상, 첨부파일이 반복해서 사용되는 경우에는 기존에 다운로드한 파일을 재사용하여 불필요한 중복 저장을 줄입니다.
+
+### 5. 원본 정보 보존
 
 Markdown에서 직접 표현할 수 없는 네이버 고유 컴포넌트는 `data-naver-*` 메타데이터를 남겨 원래 타입을 식별할 수 있도록 합니다.
 
@@ -498,8 +567,11 @@ Markdown에서 직접 표현할 수 없는 네이버 고유 컴포넌트는 `dat
 * 내부 module data
 * VOD API
 * 이미지 URL 형식
+* 첨부파일 구조 및 다운로드 URL
 * CSS / sprite 리소스
 * 각 컴포넌트의 클래스명
 * 소스코드 컴포넌트 구조 및 디자인 클래스
+
+첨부파일은 네이버 에디터 버전이나 게시글 구조에 따라 HTML 및 다운로드 URL 구조가 달라질 수 있으므로 일부 게시글에서는 추가 대응이 필요할 수 있습니다.
 
 또한 HTML/CSS 및 Markdown 확장 문법 지원 수준은 Markdown 뷰어마다 다르기 때문에 모든 뷰어에서 네이버와 완전히 동일하게 렌더링되는 것을 보장하지는 않습니다.
