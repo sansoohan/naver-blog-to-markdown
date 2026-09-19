@@ -4,11 +4,12 @@ const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
 const { protectTextComponents } = require("./src/paragraph");
+const { localizeImages } = require("./src/image");
 const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
 const { protectQuotes } = require("./src/quote");
 const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
-const { localizeImages } = require("./src/image");
+const { protectCodeBlocks } = require("./src/code");
 
 function parsePostUrl(url) {
   const parsed = new URL(url);
@@ -113,7 +114,8 @@ function restoreEmptyLines(markdown) {
   return String(markdown)
     .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
     .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
-    .replace(/NAVEREMPTYLINE/g, "<br>");
+    .replace(/NAVEREMPTYLINE/g, "<br>")
+    .replace(/<br>[ \t]*\n(?=```)/g, "<br>\n\n");
 }
 
 function cleanMarkdown(markdown) {
@@ -254,6 +256,7 @@ async function convertPost(url) {
 
   const horizontalLineTypes = protectHorizontalLines($, root, store);
 
+  protectCodeBlocks($, root, store);
   protectTextComponents($, root, store);
 
   const turndown = createTurndown();

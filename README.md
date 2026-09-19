@@ -4,7 +4,7 @@
 
 단순히 본문 텍스트만 Markdown으로 바꾸는 것이 아니라, **SmartEditor ONE의 문서 구조와 서식을 가능한 한 유지하는 것**을 목표로 합니다.
 
-텍스트 스타일, 이미지, 표, 인용구, 구분선, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석하여 Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소는 HTML/CSS를 사용해 보존합니다.
+텍스트 스타일, 이미지, 표, 인용구, 구분선, 소스코드, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석하여 Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소는 HTML/CSS를 사용해 보존합니다.
 
 ---
 
@@ -31,9 +31,13 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 ```markdown
 **굵게**
+
 *기울임*
+
 ~~취소선~~
+
 [링크](https://example.com)
+
 - [ ] 체크박스
 ```
 
@@ -41,7 +45,9 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 ```html
 <u>밑줄</u>
+
 <span style="color:#ff0000">빨간 글자</span>
+
 <span style="font-size:11px">11px 글자</span>
 ```
 
@@ -95,6 +101,45 @@ Markdown/HTML에서는 로컬 파일을 참조합니다.
 ```html
 <img src="./image-001.jpg" style="width:640px;max-width:100%;height:auto;">
 ```
+
+---
+
+### 💻 Source Code
+
+SmartEditor ONE의 **소스코드 컴포넌트**를 fenced code block으로 변환합니다.
+
+네이버 소스코드 컴포넌트의 3가지 디자인을 구분하여 원래 클래스명을 함께 보존합니다.
+
+```text
+se-l-default
+se-l-code_stripe
+se-l-code_black
+```
+
+예:
+
+````markdown
+```{se-l-default}
+const message = "Hello World";
+console.log(message);
+```
+````
+
+다른 디자인도 동일한 방식으로 기록됩니다.
+
+````markdown
+```{se-l-code_stripe}
+const value = 100;
+```
+
+```{se-l-code_black}
+const value = 200;
+```
+````
+
+코드 안에 backtick이 포함된 경우에는 내용과 충돌하지 않도록 fence 길이를 자동으로 조정합니다.
+
+또한 코드 내용의 줄바꿈과 실제 들여쓰기를 가능한 한 유지하면서 SmartEditor DOM에서 발생하는 불필요한 공백은 제거합니다.
 
 ---
 
@@ -243,20 +288,37 @@ Markdown으로 표현할 수 있는 것은 Markdown을 사용합니다.
 
 ```markdown
 **bold**
+
 *italic*
+
 ~~strike~~
+
 [link](URL)
+
 # heading
+
 - [ ] task
 ```
+
+소스코드 역시 Markdown fenced code block을 사용합니다.
+
+````markdown
+```{se-l-default}
+const value = 100;
+```
+````
 
 Markdown으로 정확하게 표현할 수 없는 경우에만 HTML을 사용합니다.
 
 ```html
 <u>underline</u>
+
 <span style="color:...">...</span>
+
 <table>...</table>
+
 <iframe ...></iframe>
+
 <video ...></video>
 ```
 
@@ -275,6 +337,7 @@ Markdown으로 정확하게 표현할 수 없는 경우에만 HTML을 사용합�
 
 ```bash
 git clone https://github.com/sansoohan/naver-blog-to-markdown.git
+
 cd naver-blog-to-markdown
 ```
 
@@ -349,7 +412,8 @@ naver-blog-to-markdown/
 │   ├── table.js
 │   ├── quote.js
 │   ├── horizontal-line.js
-│   └── video.js
+│   ├── video.js
+│   └── code.js
 ├── output/
 ├── package.json
 └── README.md
@@ -364,24 +428,37 @@ naver-blog-to-markdown/
 | `quote.js`           | 네이버 인용구 카드                    |
 | `horizontal-line.js` | 네이버 구분선                       |
 | `video.js`           | YouTube 및 네이버 동영상             |
+| `code.js`            | 네이버 소스코드 컴포넌트 및 디자인 클래스 변환    |
 
 ---
 
 ## Markdown Preview
 
-생성된 Markdown은 표준 Markdown 외에도 일부 raw HTML을 포함할 수 있습니다.
+생성된 Markdown은 표준 Markdown 외에도 일부 raw HTML과 확장된 fenced code block 정보를 포함할 수 있습니다.
 
 ```html
 <span>
+
 <table>
+
 <iframe>
+
 <video>
+
 <style>
 ```
 
+소스코드 컴포넌트는 네이버 디자인 정보를 보존하기 위해 다음과 같은 fence info string을 사용합니다.
+
+````markdown
+```{se-l-code_black}
+code...
+```
+````
+
 따라서 사용하는 Markdown 뷰어에 따라 일부 요소의 표시 결과가 달라질 수 있습니다.
 
-특히 YouTube iframe, `<video>`, `<style>`, HTML table, inline CSS 등은 Markdown 뷰어의 HTML/WebView 지원 수준에 영향을 받을 수 있습니다.
+특히 YouTube iframe, `<video>`, `<style>`, HTML table, inline CSS, 소스코드의 네이버 디자인 클래스 등은 Markdown 뷰어의 HTML/WebView 및 Markdown 확장 문법 지원 수준에 영향을 받을 수 있습니다.
 
 ---
 
@@ -403,6 +480,8 @@ Markdown으로 표현할 수 있는 요소를 불필요하게 HTML로 변환하�
 
 Markdown에서 직접 표현할 수 없는 네이버 고유 컴포넌트는 `data-naver-*` 메타데이터를 남겨 원래 타입을 식별할 수 있도록 합니다.
 
+소스코드처럼 Markdown으로 표현할 수 있지만 네이버 고유 디자인 정보가 존재하는 경우에는 fence info string 등에 원래 클래스 정보를 보존합니다.
+
 향후 Markdown → Naver 형태의 **역방향 변환 가능성**도 고려한 구조입니다.
 
 ---
@@ -421,5 +500,6 @@ Markdown에서 직접 표현할 수 없는 네이버 고유 컴포넌트는 `dat
 * 이미지 URL 형식
 * CSS / sprite 리소스
 * 각 컴포넌트의 클래스명
+* 소스코드 컴포넌트 구조 및 디자인 클래스
 
-또한 HTML/CSS 지원 수준은 Markdown 뷰어마다 다르기 때문에 모든 뷰어에서 네이버와 완전히 동일하게 렌더링되는 것을 보장하지는 않습니다.
+또한 HTML/CSS 및 Markdown 확장 문법 지원 수준은 Markdown 뷰어마다 다르기 때문에 모든 뷰어에서 네이버와 완전히 동일하게 렌더링되는 것을 보장하지는 않습니다.
