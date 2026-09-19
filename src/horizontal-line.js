@@ -1,15 +1,6 @@
 const SPRITE_URL = "https://editor-static.pstatic.net/v/basic/1.78.1/img/se-sp-viewer.ee5afa38.png";
 
-const TYPES = [
-  "default",
-  "line1",
-  "line2",
-  "line3",
-  "line4",
-  "line5",
-  "line6",
-  "line7",
-];
+const TYPES = ["default", "line1", "line2", "line3", "line4", "line5", "line6", "line7"];
 
 function getLineType(component) {
   const section = component.find(".se-section-horizontalLine").first();
@@ -30,14 +21,11 @@ function getLineAlign(component) {
   if (classes.includes("se-section-align-center")) return "center";
   if (classes.includes("se-section-align-right")) return "right";
 
-  return "";
+  return "left";
 }
 
 function renderHorizontalLine(type, align) {
-  const alignClass = align ? ` naver-hr-${align}` : "";
-  const alignData = align ? ` data-naver-align="${align}"` : "";
-
-  return `<div class="naver-hr naver-hr-${type}${alignClass}" data-naver-line-type="${type}"${alignData}><div class="naver-hr-inner"><hr></div></div>`;
+  return `<div class="naver-hr naver-hr-${type} naver-hr-${align}" data-naver-line-type="${type}" data-naver-align="${align}"><div class="naver-hr-inner"><hr></div></div>`;
 }
 
 function protectHorizontalLines($, root, store) {
@@ -74,8 +62,7 @@ function getHorizontalLineCss(usedTypes) {
 
   if (usedTypes.has("default")) {
     css.push(
-      `.naver-hr-default .naver-hr-inner{width:220px;}`,
-      `.naver-hr-default .naver-hr-inner{padding-top:30px;padding-bottom:29px;}`,
+      `.naver-hr-default .naver-hr-inner{width:220px;padding-top:30px;padding-bottom:29px;}`,
       `.naver-hr-default hr{height:1px;background-color:#ddd;}`
     );
   }
