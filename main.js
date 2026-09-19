@@ -7,32 +7,46 @@ const { protectTextComponents } = require("./src/paragraph");
 const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
 const { protectQuotes } = require("./src/quote");
+const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
 
-function parsePostUrl(input) {
-  const value = input.trim();
-  const match = value.match(/blog\.naver\.com\/([^/?#]+)\/(\d+)/i);
-  if (match) return { blogId: match[1], logNo: match[2] };
+function parsePostUrl(url) {
+  const parsed = new URL(url);
 
-  try {
-    const url = new URL(value);
-    const blogId = url.searchParams.get("blogId");
-    const logNo = url.searchParams.get("logNo");
-    if (blogId && logNo) return { blogId, logNo };
-  } catch {}
+  let blogId = parsed.searchParams.get("blogId");
+  let logNo = parsed.searchParams.get("logNo");
 
-  throw new Error("네이버 블로그 글 주소를 인식할 수 없습니다.");
+  if (!blogId || !logNo) {
+    const parts = parsed.pathname.split("/").filter(Boolean);
+
+    if (parts.length >= 2) {
+      blogId = parts[0];
+      logNo = parts[1];
+    }
+  }
+
+  if (!blogId || !logNo) throw new Error("네이버 블로그 글 URL을 확인할 수 없습니다.");
+
+  return { blogId, logNo };
 }
 
 function safeFilename(value) {
-  return String(value).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/[. ]+$/g, "").trim().slice(0, 180) || "untitled";
+  return String(value)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .trim() || "untitled";
 }
 
 function escapeHtmlText(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function escapeHtmlAttribute(value) {
-  return escapeHtmlText(value).replace(/"/g, "&quot;");
+  return escapeHtmlText(value)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function createStore() {
@@ -54,16 +68,15 @@ function createStore() {
   };
 }
 
-function getExtension(url, contentType = "") {
-  const ext = path.extname(String(url).split("?")[0]).toLowerCase();
+function getExtension(url, fallback = ".jpg") {
+  try {
+    const pathname = new URL(url).pathname;
+    const ext = path.extname(pathname);
 
-  if (/^\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(ext)) return ext === ".jpeg" ? ".jpg" : ext;
-  if (/video\/mp4/i.test(contentType)) return ".mp4";
-  if (/image\/png/i.test(contentType)) return ".png";
-  if (/image\/gif/i.test(contentType)) return ".gif";
-  if (/image\/webp/i.test(contentType)) return ".webp";
+    if (ext && ext.length <= 6) return ext.toLowerCase();
+  } catch {}
 
-  return ".jpg";
+  return fallback;
 }
 
 function createTurndown() {
@@ -75,8 +88,6 @@ function createTurndown() {
     strongDelimiter: "**",
   });
 
-  turndown.keep(["iframe", "video", "source", "table", "tr", "td", "th", "colgroup", "col"]);
-
   turndown.addRule("protected", {
     filter(node) {
       return node.nodeName === "DIV" && node.classList.contains("naver-protected");
@@ -87,44 +98,32 @@ function createTurndown() {
     },
   });
 
-  turndown.addRule("image", {
-    filter: "img",
-
-    replacement(content, node) {
-      const src = node.getAttribute("src");
-      if (!src) return "";
-
-      const width = node.getAttribute("data-width") || node.getAttribute("width");
-
-      if (width) return `\n\n<img src="${src}" width="${width}" style="max-width:100%; height:auto;">\n\n`;
-      return `\n\n![](${src})\n\n`;
+  turndown.addRule("lineBreak", {
+    filter: "br",
+    replacement() {
+      return "<br>";
     },
   });
 
   return turndown;
 }
 
-function restoreEmptyLines(text) {
-  return text
-    .replace(/(?:\s*NAVEREMPTYLINE\s*){3,}/g, "\n\n<br>\n<br>\n\n")
-    .replace(/(?:\s*NAVEREMPTYLINE\s*){2}/g, "\n\n<br>\n<br>\n\n")
-    .replace(/\s*NAVEREMPTYLINE\s*/g, "\n\n<br>\n\n");
+function restoreEmptyLines(markdown) {
+  return String(markdown)
+    .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
+    .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
+    .replace(/NAVEREMPTYLINE/g, "<br>");
 }
 
-function cleanMarkdown(text, store) {
-  let result = String(text);
-
-  result = result.replace(/\u200b/g, "").replace(/\u00a0/g, " ");
-  result = result.replace(/[ \t]+\n/g, "\n");
-  result = result.replace(/\n{4,}/g, "\n\n\n").trim();
-
-  result = store.restore(result);
-  result = restoreEmptyLines(result);
-
-  return result.trim();
+function cleanMarkdown(markdown) {
+  return String(markdown)
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
 }
 
-async function downloadFile(url, outputPath) {
+async function downloadFile(url, destination) {
   const response = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0",
@@ -135,124 +134,138 @@ async function downloadFile(url, outputPath) {
   if (!response.ok) throw new Error(`다운로드 실패: ${response.status} ${url}`);
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(outputPath, buffer);
-
-  return {
-    contentType: response.headers.get("content-type") || "",
-    size: buffer.length,
-  };
+  fs.writeFileSync(destination, buffer);
 }
 
-function getImageSource(img) {
-  return img.attr("data-lazy-src") || img.attr("data-src") || img.attr("src") || "";
+function getImageSource(image) {
+  return image.attr("data-lazy-src") || image.attr("data-src") || image.attr("src") || "";
 }
 
 function highResolutionImageUrl(url) {
+  if (!url) return "";
+
   try {
     const parsed = new URL(url);
     parsed.searchParams.set("type", "w2000");
     return parsed.toString();
   } catch {
-    return `${url}${url.includes("?") ? "&" : "?"}type=w2000`;
+    return url;
   }
 }
 
 async function localizeImages($, root, outputDir) {
-  let index = 1;
+  let imageIndex = 0;
+  const images = root.find("img").toArray();
 
-  for (const element of root.find("img").toArray()) {
-    const img = $(element);
+  for (const element of images) {
+    const image = $(element);
 
-    if (img.closest(".se-oglink").length || img.closest(".se-video").length) continue;
+    if (image.closest(".se-oglink").length) continue;
+    if (image.closest(".se-component.se-video").length) continue;
 
-    const src = getImageSource(img);
-    if (!src || src.startsWith("data:")) continue;
+    const source = getImageSource(image);
+    if (!source) continue;
 
-    const number = String(index).padStart(3, "0");
-    const temp = path.join(outputDir, `image-${number}.tmp`);
+    imageIndex++;
+
+    const ext = getExtension(source);
+    const filename = `image-${String(imageIndex).padStart(3, "0")}${ext}`;
+    const destination = path.join(outputDir, filename);
 
     try {
-      const result = await downloadFile(highResolutionImageUrl(src), temp);
-      const filename = `image-${number}${getExtension(src, result.contentType)}`;
-
-      fs.renameSync(temp, path.join(outputDir, filename));
-      img.attr("src", filename).removeAttr("data-lazy-src").removeAttr("data-src");
-      index++;
+      await downloadFile(highResolutionImageUrl(source), destination);
     } catch {
-      if (fs.existsSync(temp)) fs.unlinkSync(temp);
-      console.warn(`이미지 다운로드 실패: ${src}`);
+      imageIndex--;
+      continue;
+    }
+
+    const width = Number(image.attr("data-width"));
+
+    image.attr("src", `./${filename}`);
+    image.removeAttr("data-lazy-src");
+    image.removeAttr("data-src");
+    image.removeAttr("srcset");
+
+    if (Number.isFinite(width) && width > 0) {
+      image.attr("style", `width:${width}px;max-width:100%;height:auto;`);
+    } else {
+      image.attr("style", "max-width:100%;height:auto;");
     }
   }
 }
 
 async function protectOgCards($, root, outputDir, store) {
-  let index = 1;
+  let thumbIndex = 0;
+  const cards = root.find(".se-component.se-oglink").toArray();
 
-  for (const element of root.find(".se-oglink").toArray()) {
+  for (const element of cards) {
     const component = $(element);
-    const title = component.find(".se-oglink-title").first().text().trim();
-    const description = component.find(".se-oglink-summary").first().text().trim();
-    const url = component.find("a").first().attr("href") || "";
-    const img = component.find("img").first();
+    const link = component.find("a").first();
+    const href = link.attr("href") || "";
 
-    if (!title && !url) continue;
+    const title = component.find(".se-oglink-title").first().text().trim();
+    const summary = component.find(".se-oglink-summary").first().text().trim();
+    const domain = component.find(".se-oglink-url").first().text().trim();
+
+    const image = component.find("img").first();
+    const imageSource = image.length ? getImageSource(image) : "";
 
     let thumbnail = "";
 
-    if (img.length) {
-      const src = getImageSource(img);
+    if (imageSource) {
+      thumbIndex++;
 
-      if (src) {
-        const number = String(index).padStart(3, "0");
-        const temp = path.join(outputDir, `thumb-${number}.tmp`);
+      const ext = getExtension(imageSource);
+      const filename = `thumb-${String(thumbIndex).padStart(3, "0")}${ext}`;
+      const destination = path.join(outputDir, filename);
 
-        try {
-          const result = await downloadFile(src, temp);
-          thumbnail = `thumb-${number}${getExtension(src, result.contentType)}`;
-
-          fs.renameSync(temp, path.join(outputDir, thumbnail));
-          index++;
-        } catch {
-          if (fs.existsSync(temp)) fs.unlinkSync(temp);
-        }
+      try {
+        await downloadFile(imageSource, destination);
+        thumbnail = `./${filename}`;
+      } catch {
+        thumbIndex--;
       }
     }
 
-    const image = thumbnail
-      ? `<td style="width:120px"><img src="${thumbnail}" style="width:120px; height:auto;"></td>`
+    const imageHtml = thumbnail
+      ? `<td style="width:120px;padding:0 12px 0 0;vertical-align:middle;"><img src="${escapeHtmlAttribute(thumbnail)}" style="width:120px;height:auto;"></td>`
       : "";
 
-    const summary = description ? `<br><small>${escapeHtmlText(description)}</small>` : "";
+    const titleHtml = title ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>` : "";
+    const summaryHtml = summary ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>` : "";
+    const domainHtml = domain ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>` : "";
 
-    const html = `<table><tr>${image}<td><a href="${escapeHtmlAttribute(url)}" target="_blank">`
-      + `${escapeHtmlText(title || url)}</a>${summary}</td></tr></table>`;
+    const content = `<table style="width:100%;border-collapse:collapse;background:transparent;"><tr>${imageHtml}<td style="vertical-align:middle;"><a href="${escapeHtmlAttribute(href)}" target="_blank" style="text-decoration:none;">${titleHtml}${summaryHtml}${domainHtml}</a></td></tr></table>`;
 
-    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+    component.replaceWith(`<div class="naver-protected">${store.add(content)}</div>`);
   }
 }
 
 function getPostTitle($) {
-  const selectors = [".se-title-text", ".se-title-text span", ".pcol1 .itemSubjectBoldfont", ".htitle"];
-
-  for (const selector of selectors) {
-    const value = $(selector).first().text().trim();
-    if (value) return value;
-  }
-
-  return $("meta[property='og:title']").attr("content")?.trim() || "untitled";
+  return $(".se-title-text").first().text().trim()
+    || $(".pcol1").first().text().trim()
+    || $("meta[property='og:title']").attr("content")?.trim()
+    || $("title").text().replace(/\s*:\s*네이버 블로그\s*$/, "").trim()
+    || "untitled";
 }
 
 function getPostCategory($) {
-  return $(".blog2_series a").first().text().trim() || "uncategorized";
+  return $(".blog2_series").first().text().trim()
+    || $(".post-category").first().text().trim()
+    || "uncategorized";
 }
 
 function getPostRoot($) {
-  let root = $(".se-main-container").first();
+  const smartEditor = $(".se-main-container").first();
+  if (smartEditor.length) return smartEditor;
 
-  if (!root.length) root = $("#postViewArea").first();
-  if (!root.length) root = $(".se3_view").first();
+  const postView = $("#postViewArea").first();
+  if (postView.length) return postView;
 
-  return root;
+  const legacy = $(".se3_view").first();
+  if (legacy.length) return legacy;
+
+  throw new Error("본문 영역을 찾을 수 없습니다.");
 }
 
 async function getPost(blogId, logNo) {
@@ -261,88 +274,74 @@ async function getPost(blogId, logNo) {
   const response = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0",
-      Referer: `https://blog.naver.com/${blogId}/${logNo}`,
+      Referer: `https://blog.naver.com/${blogId}`,
     },
   });
 
-  if (!response.ok) throw new Error(`글 가져오기 실패: HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`게시글 요청 실패: ${response.status}`);
 
-  const html = await response.text();
-
-  fs.writeFileSync("debug-raw.html", html, "utf8");
-
-  const $ = cheerio.load(html);
-  const root = getPostRoot($);
-
-  if (!root.length) throw new Error("본문 영역을 찾을 수 없습니다.");
-
-  return {
-    $,
-    root,
-    title: getPostTitle($),
-    category: getPostCategory($),
-    url: `https://blog.naver.com/${blogId}/${logNo}`,
-  };
+  return response.text();
 }
 
-async function convertPost(blogId, logNo) {
-  const post = await getPost(blogId, logNo);
-  const { $, root } = post;
+async function convertPost(url) {
+  const { blogId, logNo } = parsePostUrl(url);
 
-  const outputDir = path.join("output", safeFilename(post.category), safeFilename(post.title));
-  const store = createStore();
+  console.log(`가져오는 중: ${blogId}/${logNo}`);
 
+  const html = await getPost(blogId, logNo);
+  const $ = cheerio.load(html, { decodeEntities: false });
+
+  const title = getPostTitle($);
+  const category = getPostCategory($);
+
+  const outputDir = path.join(process.cwd(), "output", safeFilename(category), safeFilename(title));
   fs.mkdirSync(outputDir, { recursive: true });
+
+  const root = getPostRoot($);
+  const store = createStore();
 
   await protectNaverVideos($, root, outputDir, store);
   await protectOgCards($, root, outputDir, store);
   await localizeImages($, root, outputDir);
 
   protectYouTube($, root, store);
-
-  // 구조를 가진 컴포넌트는 일반 텍스트보다 먼저 처리한다.
   protectTables($, root, store);
   protectQuotes($, root, store);
+
+  const horizontalLineTypes = protectHorizontalLines($, root, store);
+
   protectTextComponents($, root, store);
 
   const turndown = createTurndown();
 
-  let body = turndown.turndown(root.html() || "");
-  body = cleanMarkdown(body, store);
+  let markdown = turndown.turndown(root.html() || "");
+  markdown = store.restore(markdown);
+  markdown = restoreEmptyLines(markdown);
+  markdown = cleanMarkdown(markdown);
 
-  const markdown = `# ${post.title}\n\n> 원본: ${post.url}\n\n${body}\n`;
-  const outputPath = path.join(outputDir, "index.md");
+  const header = `# ${title}\n\n> 원본: https://blog.naver.com/${blogId}/${logNo}`;
+  const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
 
-  fs.writeFileSync(outputPath, markdown, "utf8");
+  const finalMarkdown = `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
 
-  return {
-    outputPath,
-    title: post.title,
-    category: post.category,
-  };
+  const outputFile = path.join(outputDir, "index.md");
+  fs.writeFileSync(outputFile, finalMarkdown, "utf8");
+
+  console.log(`완료: ${outputFile}`);
 }
 
 async function main() {
-  const input = process.argv.slice(2).join(" ").trim();
+  const url = process.argv[2];
 
-  if (!input) {
-    console.log("사용법: node main.js https://blog.naver.com/블로그ID/글번호");
+  if (!url) {
+    console.error("사용법: node main.js <네이버 블로그 글 URL>");
     process.exit(1);
   }
 
   try {
-    const { blogId, logNo } = parsePostUrl(input);
-
-    console.log(`blogId: ${blogId}`);
-    console.log(`logNo: ${logNo}`);
-
-    const result = await convertPost(blogId, logNo);
-
-    console.log(`제목: ${result.title}`);
-    console.log(`카테고리: ${result.category}`);
-    console.log(`저장 완료: ${path.resolve(result.outputPath)}`);
+    await convertPost(url);
   } catch (error) {
-    console.error(error.stack || error.message);
+    console.error(error);
     process.exit(1);
   }
 }
