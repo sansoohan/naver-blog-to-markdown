@@ -9,6 +9,7 @@ const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
 const { protectQuotes } = require("./src/quote");
 const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
+const { protectCodeBlocks } = require("./src/code");
 const { createImageManager, localizeImages, getImageSource } = require("./src/image");
 
 function parsePostUrl(url) {
@@ -64,11 +65,7 @@ function createStore() {
 
     restore(text) {
       let result = String(text);
-
-      for (const [token, value] of values) {
-        result = result.split(token).join(value);
-      }
-
+      for (const [token, value] of values) result = result.split(token).join(value);
       return result;
     },
   };
@@ -108,7 +105,8 @@ function restoreEmptyLines(markdown) {
   return String(markdown)
     .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
     .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
-    .replace(/NAVEREMPTYLINE/g, "<br>");
+    .replace(/NAVEREMPTYLINE/g, "<br>")
+    .replace(/<br>[ \t]*\n(?=```)/g, "<br>\n\n");
 }
 
 function cleanMarkdown(markdown) {
@@ -138,29 +136,15 @@ async function protectOgCards($, root, imageManager, store) {
 
     if (imageSource) {
       try {
-        const filename = await imageManager.download(imageSource, {
-          fallbackPrefix: "thumb",
-        });
-
+        const filename = await imageManager.download(imageSource, { fallbackPrefix: "thumb" });
         if (filename) thumbnail = `./${filename}`;
       } catch {}
     }
 
-    const imageHtml = thumbnail
-      ? `<td style="width:120px;padding:0 12px 0 0;vertical-align:middle;"><img src="${escapeHtmlAttribute(thumbnail)}" style="width:120px;height:auto;"></td>`
-      : "";
-
-    const titleHtml = title
-      ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>`
-      : "";
-
-    const summaryHtml = summary
-      ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>`
-      : "";
-
-    const domainHtml = domain
-      ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>`
-      : "";
+    const imageHtml = thumbnail ? `<td style="width:120px;padding:0 12px 0 0;vertical-align:middle;"><img src="${escapeHtmlAttribute(thumbnail)}" style="width:120px;height:auto;"></td>` : "";
+    const titleHtml = title ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>` : "";
+    const summaryHtml = summary ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>` : "";
+    const domainHtml = domain ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>` : "";
 
     const content = `<table style="width:100%;border-collapse:collapse;background:transparent;"><tr>${imageHtml}<td style="vertical-align:middle;"><a href="${escapeHtmlAttribute(href)}" target="_blank" style="text-decoration:none;">${titleHtml}${summaryHtml}${domainHtml}</a></td></tr></table>`;
 
@@ -241,6 +225,7 @@ async function convertPost(url) {
 
   const horizontalLineTypes = protectHorizontalLines($, root, store);
 
+  protectCodeBlocks($, root, store);
   protectTextComponents($, root, store);
 
   const turndown = createTurndown();
@@ -252,10 +237,10 @@ async function convertPost(url) {
 
   const header = `# ${title}\n\n> 원본: https://blog.naver.com/${blogId}/${logNo}`;
   const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
-
   const finalMarkdown = `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
 
   const outputFile = path.join(outputDir, "index.md");
+
   fs.writeFileSync(outputFile, finalMarkdown, "utf8");
 
   console.log(`완료: ${outputFile}`);
