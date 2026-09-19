@@ -13,7 +13,9 @@ output/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-debug-raw.html
+
+# 디버그
+debug-*
 
 # OS
 .DS_Store

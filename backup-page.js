@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
@@ -124,11 +125,9 @@ async function protectOgCards($, root, imageManager, store) {
     const component = $(element);
     const link = component.find("a").first();
     const href = link.attr("href") || "";
-
     const title = component.find(".se-oglink-title").first().text().trim();
     const summary = component.find(".se-oglink-summary").first().text().trim();
     const domain = component.find(".se-oglink-url").first().text().trim();
-
     const image = component.find("img").first();
     const imageSource = image.length ? getImageSource(image) : "";
 
@@ -145,7 +144,6 @@ async function protectOgCards($, root, imageManager, store) {
     const titleHtml = title ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>` : "";
     const summaryHtml = summary ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>` : "";
     const domainHtml = domain ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>` : "";
-
     const content = `<table style="width:100%;border-collapse:collapse;background:transparent;"><tr>${imageHtml}<td style="vertical-align:middle;"><a href="${escapeHtmlAttribute(href)}" target="_blank" style="text-decoration:none;">${titleHtml}${summaryHtml}${domainHtml}</a></td></tr></table>`;
 
     component.replaceWith(`<div class="naver-protected">${store.add(content)}</div>`);
@@ -194,7 +192,78 @@ async function getPost(blogId, logNo) {
   return response.text();
 }
 
-async function convertPost(url) {
+function createContentHash(root) {
+  const clone = root.clone();
+
+  clone.find(".se-component.se-file a.se-file-save-button").removeAttr("href").removeAttr("data-linkdata");
+  clone.find(".se-component.se-file script.__se_module_data").removeAttr("data-module").removeAttr("data-module-v2");
+  clone.find("pzp-pc-layout._naverVideo").removeAttr("key");
+
+  clone.find("a.videoplayer_popup_link").each((_, element) => {
+    const link = clone.find(element);
+    const href = link.attr("href");
+
+    if (href) link.attr("href", href.replace(/([?&]hashKey=)[^&"]*/i, "$1"));
+  });
+
+  return crypto.createHash("sha256").update(clone.html() || "").digest("hex");
+}
+
+function getCacheFile() {
+  return path.join(process.cwd(), "output", "backup-cache.json");
+}
+
+function loadCache() {
+  const file = getCacheFile();
+
+  if (!fs.existsSync(file)) return {};
+
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveCache(cache) {
+  const file = getCacheFile();
+  const tempFile = `${file}.tmp`;
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tempFile, JSON.stringify(cache, null, 2), "utf8");
+  fs.renameSync(tempFile, file);
+}
+
+function removeDirectory(directory) {
+  if (!directory || !fs.existsSync(directory)) return;
+  fs.rmSync(directory, { recursive: true, force: true });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function renameDirectory(source, destination) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.renameSync(source, destination);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (error.code !== "EPERM" && error.code !== "EBUSY") throw error;
+
+      await sleep(200 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
+async function convertPost(url, options = {}) {
+  const { skipUnchanged = false } = options;
   const { blogId, logNo } = parsePostUrl(url);
 
   console.log(`가져오는 중: ${blogId}/${logNo}`);
@@ -204,62 +273,126 @@ async function convertPost(url) {
 
   const title = getPostTitle($);
   const category = getPostCategory($);
+  const root = getPostRoot($);
+  const contentHash = createContentHash(root);
+
+  const cache = loadCache();
+  const cacheKey = `${blogId}/${logNo}`;
+  const previous = cache[cacheKey];
+
+  if (skipUnchanged && previous && previous.hash === contentHash) {
+    console.log("변경 없음: 건너뜀");
+
+    return {
+      status: "skipped",
+      blogId,
+      logNo,
+      title,
+      hash: contentHash,
+    };
+  }
 
   const folderName = `${logNo}_${safeFilename(title)}`;
-  const outputDir = path.join(process.cwd(), "output", safeFilename(category), folderName);
+  const finalOutputDir = path.join(process.cwd(), "output", safeFilename(category), folderName);
+  const tempOutputDir = path.join(process.cwd(), "output", ".tmp", `${blogId}_${logNo}_${Date.now()}`);
 
-  fs.mkdirSync(outputDir, { recursive: true });
+  removeDirectory(tempOutputDir);
+  fs.mkdirSync(tempOutputDir, { recursive: true });
 
-  const root = getPostRoot($);
-  const store = createStore();
-  const imageManager = createImageManager(outputDir);
+  try {
+    const store = createStore();
+    const imageManager = createImageManager(tempOutputDir);
 
-  await protectAttachments($, root, outputDir, store);
-  await protectNaverVideos($, root, outputDir, store, imageManager);
-  await protectOgCards($, root, imageManager, store);
-  await localizeImages($, root, imageManager);
+    await protectAttachments($, root, tempOutputDir, store);
+    await protectNaverVideos($, root, tempOutputDir, store, imageManager);
+    await protectOgCards($, root, imageManager, store);
+    await localizeImages($, root, imageManager);
 
-  protectYouTube($, root, store);
-  protectTables($, root, store);
-  protectQuotes($, root, store);
+    protectYouTube($, root, store);
+    protectTables($, root, store);
+    protectQuotes($, root, store);
 
-  const horizontalLineTypes = protectHorizontalLines($, root, store);
+    const horizontalLineTypes = protectHorizontalLines($, root, store);
 
-  protectCodeBlocks($, root, store);
-  protectTextComponents($, root, store);
+    protectCodeBlocks($, root, store);
+    protectTextComponents($, root, store);
 
-  const turndown = createTurndown();
+    const turndown = createTurndown();
 
-  let markdown = turndown.turndown(root.html() || "");
-  markdown = store.restore(markdown);
-  markdown = restoreEmptyLines(markdown);
-  markdown = cleanMarkdown(markdown);
+    let markdown = turndown.turndown(root.html() || "");
+    markdown = store.restore(markdown);
+    markdown = restoreEmptyLines(markdown);
+    markdown = cleanMarkdown(markdown);
 
-  const header = `# ${title}\n\n> 원본: https://blog.naver.com/${blogId}/${logNo}`;
-  const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
-  const finalMarkdown = `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
+    const header = `# ${title}\n\n> 원본: https://blog.naver.com/${blogId}/${logNo}`;
+    const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
+    const finalMarkdown = `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
 
-  const outputFile = path.join(outputDir, "index.md");
+    fs.writeFileSync(path.join(tempOutputDir, "index.md"), finalMarkdown, "utf8");
 
-  fs.writeFileSync(outputFile, finalMarkdown, "utf8");
+    if (previous?.path) {
+      const previousDir = path.resolve(process.cwd(), previous.path);
+      if (previousDir !== path.resolve(finalOutputDir)) removeDirectory(previousDir);
+    }
 
-  console.log(`완료: ${outputFile}`);
+    removeDirectory(finalOutputDir);
+    fs.mkdirSync(path.dirname(finalOutputDir), { recursive: true });
+    await renameDirectory(tempOutputDir, finalOutputDir);
+
+    const relativePath = path.relative(process.cwd(), finalOutputDir);
+
+    cache[cacheKey] = {
+      hash: contentHash,
+      modifiedAt: null,
+      title,
+      category,
+      path: relativePath,
+      backedUpAt: new Date().toISOString(),
+    };
+
+    saveCache(cache);
+
+    const finalOutputFile = path.join(finalOutputDir, "index.md");
+
+    console.log(`완료: ${finalOutputFile}`);
+
+    return {
+      status: previous ? "updated" : "new",
+      blogId,
+      logNo,
+      title,
+      category,
+      hash: contentHash,
+      path: relativePath,
+    };
+  } catch (error) {
+    removeDirectory(tempOutputDir);
+    throw error;
+  }
 }
 
 async function main() {
   const url = process.argv[2];
 
   if (!url) {
-    console.error("사용법: node main.js <네이버 블로그 글 URL>");
-    process.exit(1);
+    console.error('사용법: npm run page -- "네이버 블로그 글 URL"');
+    process.exitCode = 1;
+    return;
   }
 
   try {
-    await convertPost(url);
+    await convertPost(url, { skipUnchanged: false });
   } catch (error) {
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-main();
+module.exports = {
+  convertPost,
+  parsePostUrl,
+  getPost,
+  getPostRoot,
+};
+
+if (require.main === module) main();
