@@ -33,9 +33,7 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 **굵게**
 *기울임*
 ~~취소선~~
-
 [링크](https://example.com)
-
 - [ ] 체크박스
 ```
 
@@ -43,9 +41,7 @@ Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사�
 
 ```html
 <u>밑줄</u>
-
 <span style="color:#ff0000">빨간 글자</span>
-
 <span style="font-size:11px">11px 글자</span>
 ```
 
@@ -349,6 +345,7 @@ naver-blog-to-markdown/
 ├── main.js
 ├── src/
 │   ├── paragraph.js
+│   ├── image.js
 │   ├── table.js
 │   ├── quote.js
 │   ├── horizontal-line.js
@@ -358,14 +355,15 @@ naver-blog-to-markdown/
 └── README.md
 ```
 
-| File                 | Role                         |
-| -------------------- | ---------------------------- |
-| `main.js`            | 게시글 가져오기 및 전체 변환 흐름          |
-| `paragraph.js`       | 텍스트, 글자 크기, 인라인 서식, 링크, 체크박스 |
-| `table.js`           | Markdown/HTML 표 변환           |
-| `quote.js`           | 네이버 인용구 카드                   |
-| `horizontal-line.js` | 네이버 구분선                      |
-| `video.js`           | YouTube 및 네이버 동영상            |
+| File                 | Role                          |
+| -------------------- | ----------------------------- |
+| `main.js`            | 게시글 가져오기 및 전체 변환 흐름           |
+| `paragraph.js`       | 텍스트, 글자 크기, 인라인 서식, 링크, 체크박스  |
+| `image.js`           | 이미지 다운로드, 고해상도 이미지 및 표시 크기 처리 |
+| `table.js`           | Markdown/HTML 표 변환            |
+| `quote.js`           | 네이버 인용구 카드                    |
+| `horizontal-line.js` | 네이버 구분선                       |
+| `video.js`           | YouTube 및 네이버 동영상             |
 
 ---
 

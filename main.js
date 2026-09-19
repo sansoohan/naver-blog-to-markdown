@@ -8,6 +8,7 @@ const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
 const { protectQuotes } = require("./src/quote");
 const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
+const { localizeImages } = require("./src/image");
 
 function parsePostUrl(url) {
   const parsed = new URL(url);
@@ -137,63 +138,6 @@ async function downloadFile(url, destination) {
   fs.writeFileSync(destination, buffer);
 }
 
-function getImageSource(image) {
-  return image.attr("data-lazy-src") || image.attr("data-src") || image.attr("src") || "";
-}
-
-function highResolutionImageUrl(url) {
-  if (!url) return "";
-
-  try {
-    const parsed = new URL(url);
-    parsed.searchParams.set("type", "w2000");
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-async function localizeImages($, root, outputDir) {
-  let imageIndex = 0;
-  const images = root.find("img").toArray();
-
-  for (const element of images) {
-    const image = $(element);
-
-    if (image.closest(".se-oglink").length) continue;
-    if (image.closest(".se-component.se-video").length) continue;
-
-    const source = getImageSource(image);
-    if (!source) continue;
-
-    imageIndex++;
-
-    const ext = getExtension(source);
-    const filename = `image-${String(imageIndex).padStart(3, "0")}${ext}`;
-    const destination = path.join(outputDir, filename);
-
-    try {
-      await downloadFile(highResolutionImageUrl(source), destination);
-    } catch {
-      imageIndex--;
-      continue;
-    }
-
-    const width = Number(image.attr("data-width"));
-
-    image.attr("src", `./${filename}`);
-    image.removeAttr("data-lazy-src");
-    image.removeAttr("data-src");
-    image.removeAttr("srcset");
-
-    if (Number.isFinite(width) && width > 0) {
-      image.attr("style", `width:${width}px;max-width:100%;height:auto;`);
-    } else {
-      image.attr("style", "max-width:100%;height:auto;");
-    }
-  }
-}
-
 async function protectOgCards($, root, outputDir, store) {
   let thumbIndex = 0;
   const cards = root.find(".se-component.se-oglink").toArray();
@@ -208,7 +152,7 @@ async function protectOgCards($, root, outputDir, store) {
     const domain = component.find(".se-oglink-url").first().text().trim();
 
     const image = component.find("img").first();
-    const imageSource = image.length ? getImageSource(image) : "";
+    const imageSource = image.length ? image.attr("data-lazy-src") || image.attr("data-src") || image.attr("src") || "" : "";
 
     let thumbnail = "";
 
