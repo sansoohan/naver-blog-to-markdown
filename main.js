@@ -3,362 +3,538 @@ const path = require("path");
 const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
-
 function parsePostUrl(input) {
-  const url = new URL(input), parts = url.pathname.split("/").filter(Boolean);
-  if (parts.length >= 2 && /^\d+$/.test(parts[1])) return { blogId: parts[0], logNo: parts[1] };
-  const blogId = url.searchParams.get("blogId"), logNo = url.searchParams.get("logNo");
-  if (blogId && logNo) return { blogId, logNo };
-  throw new Error(`지원하지 않는 네이버 블로그 URL: ${input}`);
+  const value = input.trim();
+  const match = value.match(/blog\.naver\.com\/([^/?#]+)\/(\d+)/i);
+  if (match) return { blogId: match[1], logNo: match[2] };
+
+  try {
+    const url = new URL(value);
+    const blogId = url.searchParams.get("blogId");
+    const logNo = url.searchParams.get("logNo");
+    if (blogId && logNo) return { blogId, logNo };
+  } catch {}
+
+  throw new Error("네이버 블로그 글 주소를 인식할 수 없습니다.");
 }
 
-function safeFilename(name) {
-  return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "-").replace(/[. ]+$/g, "").trim().slice(0, 180);
-}
-
-function escapeHtmlAttribute(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function safeFilename(value) {
+  return String(value).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/[. ]+$/g, "").trim().slice(0, 180) || "untitled";
 }
 
 function escapeHtmlText(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeHtmlAttribute(value) {
+  return escapeHtmlText(value).replace(/"/g, "&quot;");
+}
+
+function escapeMarkdownUrl(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function escapeMarkdownTitle(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 function getStyleProperty(style, property) {
-  if (!style) return null;
-
-  for (const declaration of style.split(";")) {
-    const index = declaration.indexOf(":");
-    if (index === -1) continue;
-
-    const name = declaration.slice(0, index).trim().toLowerCase();
-    const value = declaration.slice(index + 1).trim();
-
-    if (name === property.toLowerCase() && value) return value;
-  }
-
-  return null;
+  const match = String(style || "").match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, "i"));
+  return match ? match[1].trim() : "";
 }
 
-function protectLeadingSpaces(html) {
-  const pattern = /(<(?:span|strike|s|del)\b[^>]*>)([ \t]+)/gi;
-  return html.replace(pattern, (_, tag, spaces) => `${tag}NAVERLEADINGSPACE${spaces.length}END`);
+function createStore() {
+  let index = 0;
+  const values = new Map();
+
+  return {
+    add(value) {
+      const token = `NAVERPLACEHOLDER${String(++index).padStart(8, "0")}END`;
+      values.set(token, String(value));
+      return token;
+    },
+
+    restore(text) {
+      let result = String(text);
+      for (const [token, value] of values) result = result.split(token).join(value);
+      return result;
+    },
+  };
 }
 
-function restoreLeadingSpaces(text) {
-  return text.replace(/NAVERLEADINGSPACE(\d+)END/g, (_, n) => " ".repeat(Number(n))).replace(/\u00a0/g, " ");
-}
+function getExtension(url, contentType = "") {
+  const ext = path.extname(String(url).split("?")[0]).toLowerCase();
 
-function normalizeNaverCheckbox(text) {
-  text = text.replace(/\u00a0/g, " ");
-  text = text.replace(/^([ \t]*)\\?-\s+\\?\[([xX ])\\?\]\s*/, (_, indent, checked) => {
-    return `${indent}- [${checked}] `;
-  });
-  return text.replace(/^([ \t]*)\\-\s+/, "$1- ");
-}
-
-function getYouTubeStartSeconds(inputUrl) {
-  if (!inputUrl) return null;
-
-  try {
-    const url = new URL(inputUrl);
-    const start = url.searchParams.get("start");
-
-    if (start && /^\d+$/.test(start)) return Number(start);
-
-    const t = url.searchParams.get("t");
-    if (!t) return null;
-    if (/^\d+s?$/.test(t)) return Number(t.replace(/s$/, ""));
-
-    const match = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
-    if (!match) return null;
-
-    const total = Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0);
-    return total > 0 ? total : null;
-  } catch {
-    return null;
-  }
-}
-
-function applyYouTubeStartTime(iframeHtml, startSeconds) {
-  if (!iframeHtml || !startSeconds || startSeconds <= 0) return iframeHtml;
-
-  return iframeHtml.replace(/src="([^"]+)"/i, (whole, src) => {
-    if (/[?&]start=\d+/i.test(src)) return whole;
-    return `src="${src}${src.includes("?") ? "&" : "?"}start=${startSeconds}"`;
-  });
-}
-
-function cleanMarkdown(markdown) {
-  return markdown
-    .replace(/\u200b/g, "")
-    .replace(/\u00a0/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/^([ \t]*[-*+] .+)\n{2,}(?=[ \t]*[-*+] )/gm, "$1\n")
-    .replace(/^([ \t]*\d+\. .+)\n{2,}(?=[ \t]*\d+\. )/gm, "$1\n")
-    .replace(/(?:<br>\s*){3,}/g, "<br>\n<br>\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function getImageExtension(contentType, imageUrl) {
-  const type = (contentType || "").split(";")[0].trim().toLowerCase();
-
-  switch (type) {
-    case "image/jpeg": return ".jpg";
-    case "image/png": return ".png";
-    case "image/gif": return ".gif";
-    case "image/webp": return ".webp";
-    case "image/bmp": return ".bmp";
-    case "image/svg+xml": return ".svg";
-    case "image/avif": return ".avif";
-  }
-
-  try {
-    const ext = path.extname(new URL(imageUrl).pathname).toLowerCase();
-    const allowed = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"];
-    if (allowed.includes(ext)) return ext === ".jpeg" ? ".jpg" : ext;
-  } catch {}
+  if (/^\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(ext)) return ext === ".jpeg" ? ".jpg" : ext;
+  if (/video\/mp4/i.test(contentType)) return ".mp4";
+  if (/image\/png/i.test(contentType)) return ".png";
+  if (/image\/gif/i.test(contentType)) return ".gif";
+  if (/image\/webp/i.test(contentType)) return ".webp";
 
   return ".jpg";
 }
 
-function normalizePostImageUrl(src) {
-  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
-  if (src.startsWith("//")) src = `https:${src}`;
+function getNaverFontSize(node) {
+  if (!node || node.type !== "tag") return null;
 
-  try {
-    const url = new URL(src);
-    url.searchParams.set("type", "w2000");
-    return url.toString();
-  } catch {
-    return src;
-  }
+  const className = node.attribs?.class || "";
+
+  if (/(?:^|\s)se-fs-(?:\s|$)/.test(className)) return 15;
+
+  const match = className.match(/(?:^|\s)se-fs-fs(\d+)(?:\s|$)/);
+  return match ? Number(match[1]) : null;
 }
 
-function normalizeThumbnailUrl(src) {
-  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
-  return src.startsWith("//") ? `https:${src}` : src;
-}
-
-async function downloadImage(imageUrl, outputDir, number, type) {
-  const headers = { "User-Agent": USER_AGENT, Referer: "https://blog.naver.com/" };
-  const response = await fetch(imageUrl, { headers });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-
-  const extension = getImageExtension(response.headers.get("content-type") || "", imageUrl);
-  const prefix = type === "thumbnail" ? "thumb" : "image";
-  const filename = `${prefix}-${String(number).padStart(3, "0")}${extension}`;
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  fs.writeFileSync(path.join(outputDir, filename), buffer);
-  return { filename, size: buffer.length };
-}
-
-async function getNaverVideoSource(vid, inkey) {
-  const id = encodeURIComponent(vid), key = encodeURIComponent(inkey);
-  const apiUrl = `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${id}?key=${key}`;
-  const headers = { "User-Agent": USER_AGENT, Referer: "https://blog.naver.com/" };
-  const response = await fetch(apiUrl, { headers });
-
-  if (!response.ok) throw new Error(`VOD API HTTP ${response.status} ${response.statusText}`);
-
-  const data = await response.json();
-  const videos = data.videos?.list || [];
-  if (!videos.length) throw new Error("재생 가능한 MP4를 찾지 못했습니다.");
-
-  const sorted = [...videos].sort((a, b) => {
-    const aw = Number(a.encodingOption?.width || 0), ah = Number(a.encodingOption?.height || 0);
-    const bw = Number(b.encodingOption?.width || 0), bh = Number(b.encodingOption?.height || 0);
-    return bw * bh - aw * ah;
-  });
-
-  const best = sorted[0];
-
+function createStyleState() {
   return {
-    url: best.source,
-    width: Number(best.encodingOption?.width || 0),
-    height: Number(best.encodingOption?.height || 0),
-    size: Number(best.size || 0),
+    fontSize: null,
+    color: "",
+    backgroundColor: "",
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    link: null,
   };
 }
 
-async function downloadVideo(videoUrl, outputDir, number) {
-  const filename = `video-${String(number).padStart(3, "0")}.mp4`;
-  const headers = { "User-Agent": USER_AGENT, Referer: "https://blog.naver.com/" };
-  const response = await fetch(videoUrl, { headers });
-
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(path.join(outputDir, filename), buffer);
-
-  return { filename, size: buffer.length };
+function cloneStyle(style) {
+  return {
+    ...style,
+    link: style.link ? { ...style.link } : null,
+  };
 }
 
-async function downloadVideoThumbnail(thumbnailUrl, outputDir, number) {
-  const headers = { "User-Agent": USER_AGENT, Referer: "https://blog.naver.com/" };
-  const response = await fetch(thumbnailUrl, { headers });
+function sameLink(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
 
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-
-  const extension = getImageExtension(response.headers.get("content-type") || "", thumbnailUrl);
-  const filename = `video-thumb-${String(number).padStart(3, "0")}${extension}`;
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  fs.writeFileSync(path.join(outputDir, filename), buffer);
-  return { filename, size: buffer.length };
+  return a.href === b.href
+    && a.target === b.target
+    && a.title === b.title;
 }
 
-function normalizeNaverHtml($, content) {
-  const images = [], videos = [];
+function sameStyle(a, b) {
+  return a.fontSize === b.fontSize
+    && a.color === b.color
+    && a.backgroundColor === b.backgroundColor
+    && a.bold === b.bold
+    && a.italic === b.italic
+    && a.underline === b.underline
+    && a.strike === b.strike
+    && sameLink(a.link, b.link);
+}
 
-  content.find(".se-component.se-oembed").each((_, el) => {
-    const $component = $(el), $data = $component.find("script.__se_module_data").first();
-    if (!$data.length) return;
+function normalizeSourceText(text) {
+  return String(text).replace(/\u200b/g, "").replace(/\u00a0/g, " ");
+}
 
-    const raw = $data.attr("data-module-v2") || $data.attr("data-module");
-    if (!raw) return;
+function collectStyleRuns(node, inherited = createStyleState(), runs = []) {
+  if (!node) return runs;
 
-    let moduleData;
+  if (node.type === "text") {
+    const text = normalizeSourceText(node.data || "");
+    if (text) runs.push({ type: "text", text, style: cloneStyle(inherited) });
+    return runs;
+  }
 
-    try {
-      moduleData = JSON.parse(raw);
-    } catch (error) {
-      console.warn("oEmbed 데이터 파싱 실패:", error.message);
-      return;
+  if (node.type !== "tag") return runs;
+
+  const name = String(node.name || "").toLowerCase();
+
+  if (name === "br") {
+    runs.push({ type: "break" });
+    return runs;
+  }
+
+  const state = cloneStyle(inherited);
+
+  if (name === "span") {
+    const size = getNaverFontSize(node);
+    const css = node.attribs?.style || "";
+    const color = getStyleProperty(css, "color");
+    const backgroundColor = getStyleProperty(css, "background-color");
+
+    if (size !== null) state.fontSize = size;
+    if (color) state.color = color;
+    if (backgroundColor) state.backgroundColor = backgroundColor;
+  }
+
+  if (name === "b" || name === "strong") state.bold = true;
+  if (name === "i" || name === "em") state.italic = true;
+  if (name === "u") state.underline = true;
+  if (name === "s" || name === "strike" || name === "del") state.strike = true;
+
+  if (name === "a") {
+    state.link = {
+      href: node.attribs?.href || "",
+      target: node.attribs?.target || "",
+      title: node.attribs?.title || "",
+    };
+  }
+
+  for (const child of node.children || []) collectStyleRuns(child, state, runs);
+
+  return runs;
+}
+
+function mergeRuns(runs) {
+  const result = [];
+
+  for (const run of runs) {
+    const previous = result[result.length - 1];
+
+    if (run.type === "text" && previous?.type === "text" && sameStyle(previous.style, run.style)) {
+      previous.text += run.text;
+    } else {
+      result.push(run.type === "text" ? { ...run, style: cloneStyle(run.style) } : run);
     }
+  }
 
-    const data = moduleData.data;
-    if (!data || data.providerName !== "YouTube") return;
+  return result;
+}
 
-    let iframeHtml = data.html || "";
-    if (!iframeHtml) return;
+function meaningfulRuns(runs) {
+  return runs.filter((run) => run.type === "text" && run.text.trim());
+}
 
-    iframeHtml = applyYouTubeStartTime(iframeHtml, getYouTubeStartSeconds(data.inputUrl || ""));
-    const encodedIframe = Buffer.from(iframeHtml, "utf8").toString("base64");
+function getParagraphFontSize(runs) {
+  const meaningful = meaningfulRuns(runs);
+  if (!meaningful.length) return null;
 
-    $component.replaceWith(`NAVEROEMBEDSTART${encodedIframe}NAVEROEMBEDEND`);
+  const sizes = [...new Set(meaningful.map((run) => run.style.fontSize))];
+  return sizes.length === 1 ? sizes[0] : null;
+}
+
+function hasMixedFontSizes(runs) {
+  return new Set(meaningfulRuns(runs).map((run) => run.style.fontSize)).size > 1;
+}
+
+function getHeadingLevel(size) {
+  if (size === 30) return 1;
+  if (size === 28) return 2;
+  if (size === 24) return 3;
+  if (size === 19) return 4;
+  if (size === 16) return 5;
+  if (size === 15) return 6;
+  return 0;
+}
+
+function parseCheckbox(runs) {
+  let text = "";
+
+  for (const run of runs) {
+    if (run.type === "break") break;
+    text += run.text || "";
+  }
+
+  const match = text.match(/^([ \t]*)-\s+\[([xX ])\]\s*/);
+  if (!match) return null;
+
+  return {
+    indent: match[1],
+    checked: match[2].toLowerCase() === "x" ? "x" : " ",
+    length: match[0].length,
+  };
+}
+
+function removeTextPrefix(runs, length) {
+  let remaining = length;
+
+  for (const run of runs) {
+    if (remaining <= 0) break;
+    if (run.type !== "text") continue;
+
+    if (run.text.length <= remaining) {
+      remaining -= run.text.length;
+      run.text = "";
+    } else {
+      run.text = run.text.slice(remaining);
+      remaining = 0;
+    }
+  }
+
+  return runs.filter((run) => run.type !== "text" || run.text);
+}
+
+function escapeMarkdownText(text) {
+  return String(text)
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_[\]<>~])/g, "\\$1")
+    .replace(/^([ \t]*)(#{1,6}|>|[-+])(?=\s)/gm, "$1\\$2")
+    .replace(/^([ \t]*)(\d+)\.(?=\s)/gm, "$1$2\\.");
+}
+
+function renderMarkdownFormatting(text, style) {
+  let result = escapeMarkdownText(text);
+
+  if (style.strike) result = `~~${result}~~`;
+  if (style.italic) result = `*${result}*`;
+  if (style.bold) result = `**${result}**`;
+
+  return result;
+}
+
+function renderHtmlFormatting(text, style, preserveFontSize) {
+  let result = escapeHtmlText(text);
+
+  if (style.strike) result = `<s>${result}</s>`;
+  if (style.italic) result = `<em>${result}</em>`;
+  if (style.bold) result = `<strong>${result}</strong>`;
+  if (style.underline) result = `<u>${result}</u>`;
+
+  const css = [];
+
+  if (preserveFontSize && style.fontSize !== null) css.push(`font-size:${style.fontSize}px`);
+  if (style.color) css.push(`color:${style.color}`);
+  if (style.backgroundColor) css.push(`background-color:${style.backgroundColor}`);
+
+  if (css.length) result = `<span style="${css.join(";")}">${result}</span>`;
+
+  return result;
+}
+
+function needsHtml(style, preserveFontSize) {
+  return Boolean(
+    preserveFontSize
+    || style.color
+    || style.backgroundColor
+    || style.underline
+  );
+}
+
+function renderMarkdownLink(content, link) {
+  const href = escapeMarkdownUrl(link.href);
+  const title = link.title ? ` "${escapeMarkdownTitle(link.title)}"` : "";
+
+  return `[${content}](${href}${title})`;
+}
+
+function renderHtmlLink(content, link) {
+  let attrs = `href="${escapeHtmlAttribute(link.href)}"`;
+
+  if (link.target) attrs += ` target="${escapeHtmlAttribute(link.target)}"`;
+  if (link.title) attrs += ` title="${escapeHtmlAttribute(link.title)}"`;
+
+  return `<a ${attrs}>${content}</a>`;
+}
+
+function shouldPreserveRunFontSize(run, context) {
+  if (run.type !== "text" || run.style.fontSize === null) return false;
+  if (context.heading) return false;
+
+  if (context.checkbox) return run.style.fontSize !== 13;
+  if (context.mixed) return true;
+
+  return [11, 34, 38].includes(run.style.fontSize);
+}
+
+function stripLink(style) {
+  return { ...style, link: null };
+}
+
+function paragraphNeedsHtml(runs, context) {
+  return runs.some((run) => {
+    if (run.type !== "text") return false;
+    return needsHtml(stripLink(run.style), shouldPreserveRunFontSize(run, context));
   });
+}
 
-  content.find(".se-component.se-video").each((_, el) => {
-    const $component = $(el), $data = $component.find("script.__se_module_data").first();
-    if (!$data.length) return;
+function groupRunsByLink(runs) {
+  const groups = [];
+  let current = null;
 
-    const raw = $data.attr("data-module-v2") || $data.attr("data-module");
-    if (!raw) return;
-
-    let moduleData;
-
-    try {
-      moduleData = JSON.parse(raw);
-    } catch (error) {
-      console.warn("동영상 데이터 파싱 실패:", error.message);
-      return;
+  for (const run of runs) {
+    if (run.type === "break") {
+      groups.push({ type: "break" });
+      current = null;
+      continue;
     }
 
-    const data = moduleData.data || moduleData;
-    if (!data.vid || !data.inkey) return;
+    const link = run.style.link;
 
-    const index = videos.length, token = `NAVERVIDEO${index}END`;
+    if (!link?.href) {
+      if (current?.type === "plain") {
+        current.runs.push(run);
+      } else {
+        current = { type: "plain", runs: [run] };
+        groups.push(current);
+      }
 
-    videos.push({
-      token,
-      vid: data.vid,
-      inkey: data.inkey,
-      thumbnail: normalizeThumbnailUrl(data.thumbnail || ""),
-      title: data.title || "",
-      originalWidth: Number(data.originalWidth || 0),
-      originalHeight: Number(data.originalHeight || 0),
+      continue;
+    }
+
+    if (current?.type === "link" && sameLink(current.link, link)) {
+      current.runs.push(run);
+      continue;
+    }
+
+    current = {
+      type: "link",
+      link: { ...link },
+      runs: [run],
+    };
+
+    groups.push(current);
+  }
+
+  return groups;
+}
+
+function renderMarkdownGroupRuns(runs) {
+  return runs.map((run) => renderMarkdownFormatting(run.text, stripLink(run.style))).join("");
+}
+
+function renderHtmlGroupRuns(runs, context) {
+  return runs.map((run) => {
+    const style = stripLink(run.style);
+    return renderHtmlFormatting(run.text, style, shouldPreserveRunFontSize(run, context));
+  }).join("");
+}
+
+function renderGroups(runs, context) {
+  const groups = groupRunsByLink(runs);
+  const useHtmlFormatting = paragraphNeedsHtml(runs, context);
+
+  return groups.map((group) => {
+    if (group.type === "break") return "<br>";
+
+    if (group.type === "plain") {
+      return useHtmlFormatting
+        ? renderHtmlGroupRuns(group.runs, context)
+        : renderMarkdownGroupRuns(group.runs);
+    }
+
+    if (useHtmlFormatting) {
+      return renderHtmlLink(renderHtmlGroupRuns(group.runs, context), group.link);
+    }
+
+    return renderMarkdownLink(renderMarkdownGroupRuns(group.runs), group.link);
+  }).join("");
+}
+
+function renderParagraph(node) {
+  let runs = mergeRuns(collectStyleRuns(node));
+
+  const plainText = runs.filter((run) => run.type === "text").map((run) => run.text).join("");
+  const hasBreak = runs.some((run) => run.type === "break");
+
+  if (!plainText.trim() && !hasBreak) return { empty: true, text: "" };
+
+  const paragraphSize = getParagraphFontSize(runs);
+  const mixed = hasMixedFontSizes(runs);
+  const checkbox = parseCheckbox(runs);
+  const heading = !checkbox && !mixed ? getHeadingLevel(paragraphSize) : 0;
+
+  if (checkbox) runs = removeTextPrefix(runs, checkbox.length);
+
+  const context = {
+    paragraphSize,
+    mixed,
+    checkbox: Boolean(checkbox),
+    heading,
+  };
+
+  const content = renderGroups(runs, context);
+
+  if (checkbox) return { empty: false, text: `${checkbox.indent}- [${checkbox.checked}] ${content}` };
+  if (heading) return { empty: false, text: `${"#".repeat(heading)} ${content}` };
+
+  return { empty: false, text: content };
+}
+
+function protectTextComponents($, root, store) {
+  root.find(".se-component.se-text").each((_, element) => {
+    const component = $(element);
+    const paragraphs = component.find("p.se-text-paragraph").toArray();
+
+    if (!paragraphs.length) return;
+
+    const blocks = paragraphs.map((paragraph) => {
+      const rendered = renderParagraph(paragraph);
+      return rendered.empty ? "NAVEREMPTYLINE" : rendered.text;
     });
 
-    $component.replaceWith(token);
+    const token = store.add(blocks.join("\n\n"));
+    component.replaceWith(`<div class="naver-protected">${token}</div>`);
   });
 
-  content.find(".se-component.se-oglink").each((_, el) => {
-    const $component = $(el), $link = $component.find("a[href]").first(), href = $link.attr("href");
+  root.find("p.se-text-paragraph").each((_, element) => {
+    const rendered = renderParagraph(element);
+    const value = rendered.empty ? "NAVEREMPTYLINE" : rendered.text;
+    const token = store.add(value);
 
-    if (!href) {
-      $component.remove();
+    $(element).replaceWith(`<div class="naver-protected">${token}</div>`);
+  });
+}
+
+function parseYouTubeStart(value) {
+  if (!value) return 0;
+  if (/^\d+$/.test(String(value))) return Number(value);
+
+  const text = String(value);
+  let seconds = 0;
+
+  const h = text.match(/(\d+)h/i);
+  const m = text.match(/(\d+)m/i);
+  const s = text.match(/(\d+)s/i);
+
+  if (h) seconds += Number(h[1]) * 3600;
+  if (m) seconds += Number(m[1]) * 60;
+  if (s) seconds += Number(s[1]);
+
+  return seconds;
+}
+
+function getYouTubeId(value) {
+  const text = String(value || "");
+
+  let match = text.match(/youtube\.com\/watch\?.*?v=([A-Za-z0-9_-]{6,})/i);
+  if (match) return match[1];
+
+  match = text.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/i);
+  if (match) return match[1];
+
+  match = text.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i);
+  return match ? match[1] : null;
+}
+
+function makeYouTubeIframe(id, start = 0) {
+  const src = `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ""}`;
+
+  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" `
+    + `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" `
+    + `allowfullscreen></iframe>`;
+}
+
+function protectYouTube($, root, store) {
+  root.find("script.__se_module_data").each((_, element) => {
+    const script = $(element);
+    const raw = script.attr("data-module-v2") || script.attr("data-module");
+
+    if (!raw) return;
+
+    let data;
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
       return;
     }
 
-    const title = $component.find(".se-oglink-title").first().text().trim()
-      || $component.find("strong").first().text().trim() || href;
+    const serialized = JSON.stringify(data);
+    const id = getYouTubeId(serialized);
 
-    const description = $component.find(".se-oglink-summary").first().text().trim()
-      || $component.find(".se-oglink-description").first().text().trim() || "";
+    if (!id) return;
 
-    let domain = $component.find(".se-oglink-url").first().text().trim()
-      || $component.find(".se-oglink-domain").first().text().trim();
+    const startMatch = serialized.match(/"(?:start|startTime|start_time)"\s*:\s*"?([^",}]+)"?/i);
+    const iframe = makeYouTubeIframe(id, startMatch ? parseYouTubeStart(startMatch[1]) : 0);
+    const token = store.add(iframe);
+    const component = script.closest(".se-component");
 
-    if (!domain) {
-      try {
-        domain = new URL(href).hostname.replace(/^www\./, "");
-      } catch {
-        domain = "";
-      }
-    }
-
-    const $img = $component.find("img").first();
-    let imageSrc = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
-    let imageToken = null;
-
-    imageSrc = normalizeThumbnailUrl(imageSrc);
-
-    if (imageSrc) {
-      const index = images.length;
-      imageToken = `NAVERIMAGE${index}END`;
-      images.push({ token: imageToken, url: imageSrc, type: "thumbnail" });
-    }
-
-    const safeHref = escapeHtmlAttribute(href), safeTitle = escapeHtmlText(title);
-    const safeDescription = escapeHtmlText(description), safeDomain = escapeHtmlText(domain);
-
-    let infoHtml = `<a href="${safeHref}" target="_blank"><strong>${safeTitle}</strong></a>`;
-    if (safeDescription) infoHtml += `<br><br><span>${safeDescription}</span>`;
-    if (safeDomain) infoHtml += `<br><br><small>${safeDomain}</small>`;
-
-    const cardHtml = imageToken
-      ? `<table><tbody><tr><td width="180" valign="middle"><a href="${safeHref}" target="_blank">`
-        + `<img src="${imageToken}" width="180"></a></td><td valign="middle">${infoHtml}</td></tr></tbody></table>`
-      : `<table><tbody><tr><td>${infoHtml}</td></tr></tbody></table>`;
-
-    const encodedCard = Buffer.from(cardHtml, "utf8").toString("base64");
-    $component.replaceWith(`NAVEROGCARDSTART${encodedCard}NAVEROGCARDEND`);
+    if (component.length) component.replaceWith(`<div class="naver-protected">${token}</div>`);
+    else script.replaceWith(`<div class="naver-protected">${token}</div>`);
   });
-
-  content.find("script, style, noscript").remove();
-
-  content.find("img").each((_, img) => {
-    const $img = $(img);
-    let src = $img.attr("data-lazy-src") || $img.attr("data-src") || $img.attr("src");
-
-    src = normalizePostImageUrl(src);
-    if (!src) return;
-
-    const index = images.length, token = `NAVERIMAGE${index}END`;
-    const width = Number($img.attr("data-width")) || null;
-    const height = Number($img.attr("data-height")) || null;
-
-    images.push({ token, url: src, type: "image", width, height });
-
-    $img.attr("src", token);
-    if (width) $img.attr("width", String(width));
-    if (height) $img.attr("height", String(height));
-
-    $img.removeAttr("data-lazy-src");
-    $img.removeAttr("data-src");
-  });
-
-  content.find("a").each((_, a) => {
-    const $a = $(a), href = $a.attr("href");
-    if ((!href || href === "#") && $a.find("img").length) $a.replaceWith($a.contents());
-  });
-
-  return { images, videos };
 }
 
 function createTurndown() {
@@ -370,353 +546,420 @@ function createTurndown() {
     strongDelimiter: "**",
   });
 
-  turndown.addRule("preserveLinks", {
-    filter: "a",
-    replacement(content, node) {
-      const href = node.getAttribute("href");
-      if (!href) return content;
+  turndown.keep(["iframe", "video", "source", "table", "tr", "td"]);
 
-      let attrs = `href="${escapeHtmlAttribute(href)}"`;
-      const target = node.getAttribute("target"), title = node.getAttribute("title");
-
-      if (target) attrs += ` target="${escapeHtmlAttribute(target)}"`;
-      if (title) attrs += ` title="${escapeHtmlAttribute(title)}"`;
-
-      return `<a ${attrs}>${content}</a>`;
-    },
-  });
-
-  turndown.addRule("underline", {
-    filter: "u",
-    replacement(content) {
-      return content ? `<u>${content}</u>` : "";
-    },
-  });
-
-  turndown.addRule("strikethrough", {
-    filter: ["s", "strike", "del"],
-    replacement(content, node) {
-      const raw = (node.textContent || "").replace(/\u200b/g, "").replace(/\u00a0/g, " ");
-
-      // 들여쓰기 있는 취소선 체크박스
-      const indented = raw.match(/^NAVERLEADINGSPACE(\d+)END-\s+\[([xX ])\]\s*(.*)$/);
-
-      if (indented) {
-        const indent = " ".repeat(Number(indented[1]));
-        return `${indent}- [${indented[2]}] ~~${indented[3].trimEnd()}~~`;
-      }
-
-      // 들여쓰기 없는 취소선 체크박스
-      const checkbox = raw.match(/^-\s+\[([xX ])\]\s*(.*)$/);
-      if (checkbox) return `- [${checkbox[1]}] ~~${checkbox[2].trimEnd()}~~`;
-
-      return content ? `~~${content}~~` : "";
-    },
-  });
-
-  turndown.addRule("bold", {
-    filter: ["strong", "b"],
-    replacement(content) {
-      return content ? `**${content}**` : "";
-    },
-  });
-
-  turndown.addRule("italic", {
-    filter: ["em", "i"],
-    replacement(content) {
-      return content ? `*${content}*` : "";
-    },
-  });
-
-  turndown.addRule("naverTextSpan", {
+  turndown.addRule("protected", {
     filter(node) {
-      if (node.nodeName !== "SPAN") return false;
-
-      const className = node.getAttribute("class") || "", style = node.getAttribute("style") || "";
-
-      return /\bse-fs-fs\d+\b/.test(className)
-        || Boolean(getStyleProperty(style, "color"))
-        || Boolean(getStyleProperty(style, "background-color"));
+      return node.nodeName === "DIV" && node.classList.contains("naver-protected");
     },
 
     replacement(content, node) {
-      let text = content.replace(/\u200b/g, "").trimEnd();
-      if (!text.trim()) return "";
-
-      const className = node.getAttribute("class") || "", style = node.getAttribute("style") || "";
-      const sizeMatch = className.match(/\bse-fs-fs(\d+)\b/), size = sizeMatch ? Number(sizeMatch[1]) : null;
-      const color = getStyleProperty(style, "color");
-      const backgroundColor = getStyleProperty(style, "background-color");
-      const styles = [];
-
-      if (color) styles.push(`color:${color}`);
-      if (backgroundColor) styles.push(`background-color:${backgroundColor}`);
-
-      if (size === 13 || size === null) {
-        if (styles.length) return `<span style="${styles.join(";")}">${text}</span>`;
-        return text;
-      }
-
-      if (styles.length) text = `<span style="${styles.join(";")}">${text}</span>`;
-
-      switch (size) {
-        case 15: return `\n\n#### ${text}\n\n`;
-        case 16: return `\n\n### ${text}\n\n`;
-        case 19: return `\n\n## ${text}\n\n`;
-        case 24: return `\n\n# ${text}\n\n`;
-
-        default: {
-          const fallbackStyles = [`font-size:${size}px`];
-
-          if (color) fallbackStyles.push(`color:${color}`);
-          if (backgroundColor) fallbackStyles.push(`background-color:${backgroundColor}`);
-
-          return `<span style="${fallbackStyles.join(";")}">${content.replace(/\u200b/g, "").trimEnd()}</span>`;
-        }
-      }
+      return `\n\n${node.textContent}\n\n`;
     },
   });
 
-  turndown.addRule("naverImage", {
+  turndown.addRule("image", {
     filter: "img",
+
     replacement(content, node) {
-      const src = node.getAttribute("src"), width = node.getAttribute("width");
+      const src = node.getAttribute("src");
       if (!src) return "";
+
+      const width = node.getAttribute("data-width") || node.getAttribute("width");
 
       if (width) return `\n\n<img src="${src}" width="${width}" style="max-width:100%; height:auto;">\n\n`;
       return `\n\n![](${src})\n\n`;
     },
   });
 
-  turndown.addRule("naverParagraph", {
-    filter(node) {
-      return node.nodeName === "P"
-        && (node.getAttribute("class") || "").includes("se-text-paragraph")
-        && node.parentNode?.nodeName !== "LI";
-    },
-
-    replacement(content) {
-      let text = content.replace(/\u200b/g, "").trimEnd();
-      if (!text.trim()) return "\nNAVEREMPTYLINE\n";
-
-      text = restoreLeadingSpaces(text);
-      text = normalizeNaverCheckbox(text);
-      text = text.replace(/^([ \t]*)\\(-{3,})$/, "$1$2");
-
-      return `${text}\n`;
-    },
-  });
-
   return turndown;
 }
 
-function restoreEmptyLines(markdown) {
-  return markdown.replace(/(?:\s*NAVEREMPTYLINE\s*)+/g, (match) => {
-    const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
-
-    if (count === 1) return "\n\n";
-    if (count === 2) return "\n\n<br>\n\n";
-    return "\n\n<br>\n<br>\n\n";
-  });
+function restoreEmptyLines(text) {
+  return text
+    .replace(/(?:\s*NAVEREMPTYLINE\s*){3,}/g, "\n\n<br>\n<br>\n\n")
+    .replace(/(?:\s*NAVEREMPTYLINE\s*){2}/g, "\n\n<br>\n<br>\n\n")
+    .replace(/\s*NAVEREMPTYLINE\s*/g, "\n\n<br>\n\n");
 }
 
-function restoreOEmbed(markdown) {
-  return markdown.replace(/NAVEROEMBEDSTART([A-Za-z0-9+/=]+)NAVEROEMBEDEND/g, (_, encoded) => {
+function cleanMarkdown(text, store) {
+  let result = String(text);
+
+  result = result.replace(/\u200b/g, "").replace(/\u00a0/g, " ");
+  result = result.replace(/[ \t]+\n/g, "\n");
+  result = result.replace(/\n{4,}/g, "\n\n\n").trim();
+
+  result = store.restore(result);
+  result = restoreEmptyLines(result);
+
+  return result.trim();
+}
+
+async function downloadFile(url, outputPath) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Referer: "https://blog.naver.com/",
+    },
+  });
+
+  if (!response.ok) throw new Error(`다운로드 실패: ${response.status} ${url}`);
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(outputPath, buffer);
+
+  return {
+    contentType: response.headers.get("content-type") || "",
+    size: buffer.length,
+  };
+}
+
+function getImageSource(img) {
+  return img.attr("data-lazy-src") || img.attr("data-src") || img.attr("src") || "";
+}
+
+function highResolutionImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("type", "w2000");
+    return parsed.toString();
+  } catch {
+    return `${url}${url.includes("?") ? "&" : "?"}type=w2000`;
+  }
+}
+
+async function localizeImages($, root, outputDir) {
+  let index = 1;
+
+  for (const element of root.find("img").toArray()) {
+    const img = $(element);
+
+    if (img.closest(".se-oglink").length || img.closest(".se-video").length) continue;
+
+    const src = getImageSource(img);
+    if (!src || src.startsWith("data:")) continue;
+
+    const number = String(index).padStart(3, "0");
+    const temp = path.join(outputDir, `image-${number}.tmp`);
+
     try {
-      return `\n\n${Buffer.from(encoded, "base64").toString("utf8")}\n\n`;
-    } catch (error) {
-      console.warn("oEmbed 복원 실패:", error.message);
-      return "";
+      const result = await downloadFile(highResolutionImageUrl(src), temp);
+      const filename = `image-${number}${getExtension(src, result.contentType)}`;
+
+      fs.renameSync(temp, path.join(outputDir, filename));
+      img.attr("src", filename).removeAttr("data-lazy-src").removeAttr("data-src");
+      index++;
+    } catch {
+      if (fs.existsSync(temp)) fs.unlinkSync(temp);
+      console.warn(`이미지 다운로드 실패: ${src}`);
     }
-  });
+  }
 }
 
-function restoreOgCards(markdown) {
-  return markdown.replace(/NAVEROGCARDSTART([A-Za-z0-9+/=]+)NAVEROGCARDEND/g, (_, encoded) => {
-    try {
-      return `\n\n${Buffer.from(encoded, "base64").toString("utf8")}\n\n`;
-    } catch (error) {
-      console.warn("OG 카드 복원 실패:", error.message);
-      return "";
+async function protectOgCards($, root, outputDir, store) {
+  let index = 1;
+
+  for (const element of root.find(".se-oglink").toArray()) {
+    const component = $(element);
+    const title = component.find(".se-oglink-title").first().text().trim();
+    const description = component.find(".se-oglink-summary").first().text().trim();
+    const url = component.find("a").first().attr("href") || "";
+    const img = component.find("img").first();
+
+    if (!title && !url) continue;
+
+    let thumbnail = "";
+
+    if (img.length) {
+      const src = getImageSource(img);
+
+      if (src) {
+        const number = String(index).padStart(3, "0");
+        const temp = path.join(outputDir, `thumb-${number}.tmp`);
+
+        try {
+          const result = await downloadFile(src, temp);
+          thumbnail = `thumb-${number}${getExtension(src, result.contentType)}`;
+
+          fs.renameSync(temp, path.join(outputDir, thumbnail));
+          index++;
+        } catch {
+          if (fs.existsSync(temp)) fs.unlinkSync(temp);
+        }
+      }
     }
-  });
+
+    const image = thumbnail
+      ? `<td style="width:120px"><img src="${thumbnail}" style="width:120px; height:auto;"></td>`
+      : "";
+
+    const summary = description ? `<br><small>${escapeHtmlText(description)}</small>` : "";
+
+    const html = `<table><tr>${image}<td><a href="${escapeHtmlAttribute(url)}" target="_blank">`
+      + `${escapeHtmlText(title || url)}</a>${summary}</td></tr></table>`;
+
+    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+  }
 }
 
-async function localizeImages(markdown, images, outputDir) {
-  let result = markdown, imageNumber = 0, thumbnailNumber = 0;
+function findVideoMetadata(value) {
+  const text = String(value || "");
+  const vid = text.match(/"(?:vid|videoId|video_id)"\s*:\s*"([^"]+)"/i);
+  const inKey = text.match(/"(?:inKey|inkey|in_key)"\s*:\s*"([^"]+)"/i);
 
-  for (const image of images) {
-    const number = image.type === "thumbnail" ? ++thumbnailNumber : ++imageNumber;
+  return vid ? { vid: vid[1], inKey: inKey ? inKey[1] : "" } : null;
+}
 
-    try {
-      const downloaded = await downloadImage(image.url, outputDir, number, image.type);
-      const label = image.type === "thumbnail" ? "썸네일" : "이미지";
+async function fetchVideoInfo(vid, inKey) {
+  const params = new URLSearchParams({ vid });
+  if (inKey) params.set("inKey", inKey);
 
-      console.log(`${label}: ${downloaded.filename} (${downloaded.size} bytes)`);
-      result = result.replaceAll(image.token, downloaded.filename);
-    } catch (error) {
-      const label = image.type === "thumbnail" ? "썸네일" : "이미지";
+  const response = await fetch(
+    `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${vid}?${params}`,
+    { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/" } },
+  );
 
-      console.warn(`${label} 다운로드 실패: ${image.url}`);
-      console.warn(`  ${error.message}`);
+  if (!response.ok) throw new Error(`Naver VOD API 실패: ${response.status}`);
 
-      result = result.replaceAll(image.token, image.url);
+  return response.json();
+}
+
+function findBestMp4(data) {
+  const results = [];
+
+  function walk(value) {
+    if (!value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+
+    if (typeof value !== "object") return;
+
+    const src = value.source || value.url || value.src || "";
+    const type = value.type || value.mimeType || value.mime || "";
+
+    if (
+      typeof src === "string"
+      && src.startsWith("http")
+      && (/\.mp4(?:\?|$)/i.test(src) || /video\/mp4/i.test(type))
+    ) {
+      const width = Number(value.width || value.encodingWidth || value.videoWidth || 0);
+      const height = Number(value.height || value.encodingHeight || value.videoHeight || 0);
+      const bitrate = Number(value.bitrate || value.videoBitrate || 0);
+
+      results.push({ src, score: width * height * 1000000 + bitrate });
+    }
+
+    Object.values(value).forEach(walk);
+  }
+
+  walk(data);
+  results.sort((a, b) => b.score - a.score);
+
+  return results[0]?.src || "";
+}
+
+function findPoster(data) {
+  let result = "";
+
+  function walk(value) {
+    if (result || !value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+
+    if (typeof value !== "object") return;
+
+    for (const [key, child] of Object.entries(value)) {
+      if (
+        typeof child === "string"
+        && child.startsWith("http")
+        && /thumbnail|poster|cover/i.test(key)
+        && /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)
+      ) {
+        result = child;
+        return;
+      }
+
+      walk(child);
     }
   }
 
+  walk(data);
   return result;
 }
 
-async function localizeVideos(markdown, videos, outputDir) {
-  let result = markdown;
+async function protectNaverVideos($, root, outputDir, store) {
+  let index = 1;
 
-  for (let i = 0; i < videos.length; i++) {
-    const video = videos[i], number = i + 1;
+  for (const element of root.find(".se-video, .se-component.se-video").toArray()) {
+    const component = $(element);
+    let metadata = null;
+
+    for (const script of component.find("script").toArray()) {
+      const node = $(script);
+      const raw = node.attr("data-module-v2") || node.attr("data-module") || node.html() || "";
+
+      metadata = findVideoMetadata(raw);
+      if (metadata) break;
+    }
+
+    if (!metadata) metadata = findVideoMetadata(component.html() || "");
+    if (!metadata) continue;
 
     try {
-      console.log(`동영상 ${number}/${videos.length}: 재생정보 가져오는 중...`);
+      const info = await fetchVideoInfo(metadata.vid, metadata.inKey);
+      const videoUrl = findBestMp4(info);
 
-      const source = await getNaverVideoSource(video.vid, video.inkey);
-      console.log(`동영상 ${number}: 최고화질 ${source.width}x${source.height}`);
+      if (!videoUrl) continue;
 
-      const downloaded = await downloadVideo(source.url, outputDir, number);
-      console.log(`동영상 ${number}: ${downloaded.filename} (${downloaded.size} bytes)`);
+      const number = String(index).padStart(3, "0");
+      const videoFilename = `video-${number}.mp4`;
+
+      await downloadFile(videoUrl, path.join(outputDir, videoFilename));
 
       let poster = "";
+      const posterUrl = findPoster(info);
 
-      if (video.thumbnail) {
+      if (posterUrl) {
+        const temp = path.join(outputDir, `video-thumb-${number}.tmp`);
+
         try {
-          const thumbnail = await downloadVideoThumbnail(video.thumbnail, outputDir, number);
-          poster = thumbnail.filename;
-          console.log(`동영상 썸네일 ${number}: ${thumbnail.filename} (${thumbnail.size} bytes)`);
-        } catch (error) {
-          console.warn(`동영상 썸네일 다운로드 실패: ${error.message}`);
+          const result = await downloadFile(posterUrl, temp);
+          const filename = `video-thumb-${number}${getExtension(posterUrl, result.contentType)}`;
+
+          fs.renameSync(temp, path.join(outputDir, filename));
+          poster = ` poster="${filename}"`;
+        } catch {
+          if (fs.existsSync(temp)) fs.unlinkSync(temp);
         }
       }
 
-      const posterAttr = poster ? ` poster="${escapeHtmlAttribute(poster)}"` : "";
-      const src = escapeHtmlAttribute(downloaded.filename);
-      const videoHtml = `<video controls style="width:100%; height:auto;"${posterAttr}>`
-        + `<source src="${src}" type="video/mp4"></video>`;
+      const html = `<video controls style="width:100%; height:auto;"${poster}>`
+        + `<source src="${videoFilename}" type="video/mp4"></video>`;
 
-      result = result.replaceAll(video.token, `\n\n${videoHtml}\n\n`);
-    } catch (error) {
-      console.warn(`동영상 ${number} 다운로드 실패: ${error.message}`);
-
-      const fallback = video.thumbnail
-        ? `<img src="${escapeHtmlAttribute(video.thumbnail)}" alt="${escapeHtmlAttribute(video.title || "video")}">`
-        : "[동영상 다운로드 실패]";
-
-      result = result.replaceAll(video.token, `\n\n${fallback}\n\n`);
+      component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+      index++;
+    } catch {
+      console.warn(`동영상 다운로드 실패: ${metadata.vid}`);
     }
   }
-
-  return result;
 }
 
-async function getPost(inputUrl) {
-  const { blogId, logNo } = parsePostUrl(inputUrl);
-  const id = encodeURIComponent(blogId), no = encodeURIComponent(logNo);
-  const postUrl = `https://blog.naver.com/PostView.naver?blogId=${id}&logNo=${no}`;
+function getPostTitle($) {
+  const selectors = [".se-title-text", ".se-title-text span", ".pcol1 .itemSubjectBoldfont", ".htitle"];
 
-  console.log(`가져오는 중: ${postUrl}`);
-
-  const headers = { "User-Agent": USER_AGENT, Referer: "https://blog.naver.com/" };
-  const response = await fetch(postUrl, { headers });
-
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-
-  let html = await response.text();
-  html = protectLeadingSpaces(html);
-
-  const $ = cheerio.load(html);
-
-  let title = $('meta[property="og:title"]').attr("content")
-    || $(".se-title-text").text().trim()
-    || $("title").text().trim()
-    || `${blogId}-${logNo}`;
-
-  title = title.replace(/\s*:\s*네이버 블로그\s*$/, "").trim();
-
-  const categoryLink = $(".blog2_series a").first();
-  let categoryName = categoryLink.text().trim(), categoryNo = null;
-  const categoryHref = categoryLink.attr("href");
-
-  if (categoryHref) {
-    try {
-      categoryNo = new URL(categoryHref, "https://blog.naver.com").searchParams.get("categoryNo");
-    } catch {}
+  for (const selector of selectors) {
+    const value = $(selector).first().text().trim();
+    if (value) return value;
   }
 
-  if (!categoryName) categoryName = "미분류";
+  return $("meta[property='og:title']").attr("content")?.trim() || "untitled";
+}
 
-  console.log(`카테고리: ${categoryName}${categoryNo ? ` (${categoryNo})` : ""}`);
+function getPostCategory($) {
+  return $(".blog2_series a").first().text().trim() || "uncategorized";
+}
 
-  let content = $(".se-main-container").first();
-  if (!content.length) content = $("#postViewArea").first();
-  if (!content.length) content = $(".se3_view").first();
-  if (!content.length) throw new Error("본문 영역을 찾지 못했습니다.");
+function getPostRoot($) {
+  let root = $(".se-main-container").first();
 
-  const { images, videos } = normalizeNaverHtml($, content);
+  if (!root.length) root = $("#postViewArea").first();
+  if (!root.length) root = $(".se3_view").first();
 
-  console.log(`본문 이미지: ${images.filter((x) => x.type === "image").length}개`);
-  console.log(`링크 썸네일: ${images.filter((x) => x.type === "thumbnail").length}개`);
-  console.log(`네이버 동영상: ${videos.length}개`);
+  return root;
+}
+
+async function getPost(blogId, logNo) {
+  const url = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(logNo)}`;
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Referer: `https://blog.naver.com/${blogId}/${logNo}`,
+    },
+  });
+
+  if (!response.ok) throw new Error(`글 가져오기 실패: HTTP ${response.status}`);
+
+  const html = await response.text();
+
+  fs.writeFileSync("debug-raw.html", html, "utf8");
+
+  const $ = cheerio.load(html);
+  const root = getPostRoot($);
+
+  if (!root.length) throw new Error("본문 영역을 찾을 수 없습니다.");
+
+  return {
+    $,
+    root,
+    title: getPostTitle($),
+    category: getPostCategory($),
+    url: `https://blog.naver.com/${blogId}/${logNo}`,
+  };
+}
+
+async function convertPost(blogId, logNo) {
+  const post = await getPost(blogId, logNo);
+  const { $, root } = post;
+
+  const outputDir = path.join("output", safeFilename(post.category), safeFilename(post.title));
+  const store = createStore();
+
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  await protectNaverVideos($, root, outputDir, store);
+  await protectOgCards($, root, outputDir, store);
+  await localizeImages($, root, outputDir);
+
+  protectYouTube($, root, store);
+  protectTextComponents($, root, store);
 
   const turndown = createTurndown();
-  let bodyMarkdown = turndown.turndown(content.html() || "");
 
-  bodyMarkdown = restoreEmptyLines(bodyMarkdown);
-  bodyMarkdown = cleanMarkdown(bodyMarkdown);
-  bodyMarkdown = restoreOEmbed(bodyMarkdown);
-  bodyMarkdown = restoreOgCards(bodyMarkdown);
-  bodyMarkdown = cleanMarkdown(bodyMarkdown);
+  let body = turndown.turndown(root.html() || "");
+  body = cleanMarkdown(body, store);
 
-  const markdown = [
-    `# ${title}`,
-    "",
-    `> 원본: https://blog.naver.com/${blogId}/${logNo}`,
-    "",
-    bodyMarkdown,
-    "",
-  ].join("\n");
+  const markdown = `# ${post.title}\n\n> 원본: ${post.url}\n\n${body}\n`;
+  const outputPath = path.join(outputDir, "index.md");
 
-  return { title, blogId, logNo, categoryName, categoryNo, markdown, images, videos };
+  fs.writeFileSync(outputPath, markdown, "utf8");
+
+  return {
+    outputPath,
+    title: post.title,
+    category: post.category,
+  };
 }
 
 async function main() {
-  const inputUrl = process.argv[2], dest = process.argv[3] || "output";
+  const input = process.argv.slice(2).join(" ").trim();
 
-  if (!inputUrl) {
-    console.log("사용법:\nnode main.js <네이버 블로그 글 URL> [저장폴더]");
+  if (!input) {
+    console.log("사용법: node main.js https://blog.naver.com/블로그ID/글번호");
     process.exit(1);
   }
 
-  const post = await getPost(inputUrl);
-  const postFolderName = safeFilename(post.title) || `${post.blogId}-${post.logNo}`;
-  const categoryFolder = safeFilename(post.categoryName) || "미분류";
-  const postDir = path.join(dest, categoryFolder, postFolderName);
+  try {
+    const { blogId, logNo } = parsePostUrl(input);
 
-  fs.mkdirSync(postDir, { recursive: true });
+    console.log(`blogId: ${blogId}`);
+    console.log(`logNo: ${logNo}`);
 
-  post.markdown = await localizeImages(post.markdown, post.images, postDir);
-  post.markdown = await localizeVideos(post.markdown, post.videos, postDir);
-  post.markdown = cleanMarkdown(post.markdown) + "\n";
+    const result = await convertPost(blogId, logNo);
 
-  const outputPath = path.join(postDir, "index.md");
-  fs.writeFileSync(outputPath, post.markdown, "utf8");
-
-  console.log("");
-  console.log(`완료: ${outputPath}`);
-  console.log(`이미지: ${post.images.filter((x) => x.type === "image").length}개`);
-  console.log(`링크 썸네일: ${post.images.filter((x) => x.type === "thumbnail").length}개`);
-  console.log(`동영상: ${post.videos.length}개`);
-  console.log(`글자 수: ${post.markdown.length}`);
+    console.log(`제목: ${result.title}`);
+    console.log(`카테고리: ${result.category}`);
+    console.log(`저장 완료: ${path.resolve(result.outputPath)}`);
+  } catch (error) {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  }
 }
 
-main().catch((error) => {
-  console.error("");
-  console.error("실패:", error.message);
-  console.error(error.stack);
-  process.exit(1);
-});
+main();
