@@ -3,6 +3,7 @@ const path = require("path");
 const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
+const { protectAttachments } = require("./src/attachment");
 const { protectTextComponents } = require("./src/paragraph");
 const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
@@ -63,7 +64,11 @@ function createStore() {
 
     restore(text) {
       let result = String(text);
-      for (const [token, value] of values) result = result.split(token).join(value);
+
+      for (const [token, value] of values) {
+        result = result.split(token).join(value);
+      }
+
       return result;
     },
   };
@@ -90,6 +95,7 @@ function createTurndown() {
 
   turndown.addRule("lineBreak", {
     filter: "br",
+
     replacement() {
       return "<br>";
     },
@@ -144,9 +150,17 @@ async function protectOgCards($, root, imageManager, store) {
       ? `<td style="width:120px;padding:0 12px 0 0;vertical-align:middle;"><img src="${escapeHtmlAttribute(thumbnail)}" style="width:120px;height:auto;"></td>`
       : "";
 
-    const titleHtml = title ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>` : "";
-    const summaryHtml = summary ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>` : "";
-    const domainHtml = domain ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>` : "";
+    const titleHtml = title
+      ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>`
+      : "";
+
+    const summaryHtml = summary
+      ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>`
+      : "";
+
+    const domainHtml = domain
+      ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>`
+      : "";
 
     const content = `<table style="width:100%;border-collapse:collapse;background:transparent;"><tr>${imageHtml}<td style="vertical-align:middle;"><a href="${escapeHtmlAttribute(href)}" target="_blank" style="text-decoration:none;">${titleHtml}${summaryHtml}${domainHtml}</a></td></tr></table>`;
 
@@ -216,6 +230,7 @@ async function convertPost(url) {
   const store = createStore();
   const imageManager = createImageManager(outputDir);
 
+  await protectAttachments($, root, outputDir, store);
   await protectNaverVideos($, root, outputDir, store, imageManager);
   await protectOgCards($, root, imageManager, store);
   await localizeImages($, root, imageManager);
