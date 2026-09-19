@@ -6,6 +6,7 @@ const TurndownService = require("turndown");
 const { protectTextComponents } = require("./src/paragraph");
 const { protectTables } = require("./src/table");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
+const { protectQuotes } = require("./src/quote");
 
 function parsePostUrl(input) {
   const value = input.trim();
@@ -74,7 +75,7 @@ function createTurndown() {
     strongDelimiter: "**",
   });
 
-  turndown.keep(["iframe", "video", "source", "table", "tr", "td"]);
+  turndown.keep(["iframe", "video", "source", "table", "tr", "td", "th", "colgroup", "col"]);
 
   turndown.addRule("protected", {
     filter(node) {
@@ -231,12 +232,7 @@ async function protectOgCards($, root, outputDir, store) {
 }
 
 function getPostTitle($) {
-  const selectors = [
-    ".se-title-text",
-    ".se-title-text span",
-    ".pcol1 .itemSubjectBoldfont",
-    ".htitle",
-  ];
+  const selectors = [".se-title-text", ".se-title-text span", ".pcol1 .itemSubjectBoldfont", ".htitle"];
 
   for (const selector of selectors) {
     const value = $(selector).first().text().trim();
@@ -293,12 +289,7 @@ async function convertPost(blogId, logNo) {
   const post = await getPost(blogId, logNo);
   const { $, root } = post;
 
-  const outputDir = path.join(
-    "output",
-    safeFilename(post.category),
-    safeFilename(post.title),
-  );
-
+  const outputDir = path.join("output", safeFilename(post.category), safeFilename(post.title));
   const store = createStore();
 
   fs.mkdirSync(outputDir, { recursive: true });
@@ -309,9 +300,9 @@ async function convertPost(blogId, logNo) {
 
   protectYouTube($, root, store);
 
-  // 표 안의 문단이 먼저 처리되면 표 구조를 잃기 때문에
-  // 반드시 표 → 일반 문단 순서로 처리한다.
+  // 구조를 가진 컴포넌트는 일반 텍스트보다 먼저 처리한다.
   protectTables($, root, store);
+  protectQuotes($, root, store);
   protectTextComponents($, root, store);
 
   const turndown = createTurndown();
