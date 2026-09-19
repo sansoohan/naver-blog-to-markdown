@@ -207,13 +207,13 @@ async function convertPost(url) {
   const title = getPostTitle($);
   const category = getPostCategory($);
 
-  const outputDir = path.join(process.cwd(), "output", safeFilename(category), safeFilename(title));
+  const folderName = `${logNo}_${safeFilename(title)}`;
+  const outputDir = path.join(process.cwd(), "output", safeFilename(category), folderName);
+
   fs.mkdirSync(outputDir, { recursive: true });
 
   const root = getPostRoot($);
   const store = createStore();
-
-  // 게시글 하나에서 사용하는 모든 이미지가 이 manager를 공유한다.
   const imageManager = createImageManager(outputDir);
 
   await protectNaverVideos($, root, outputDir, store, imageManager);
