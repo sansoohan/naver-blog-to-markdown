@@ -1,7 +1,6 @@
-// src/video.js
-
 const fs = require("fs");
 const path = require("path");
+const cheerio = require("cheerio");
 
 function safeFilename(value, fallback) {
   let filename;
@@ -52,15 +51,35 @@ async function downloadFile(url, outputPath) {
     },
   });
 
-  if (!response.ok) throw new Error(`다운로드 실패: ${response.status} ${url}`);
+  if (!response.ok) {
+    throw new Error(`다운로드 실패: ${response.status} ${url}`);
+  }
 
   const buffer = Buffer.from(await response.arrayBuffer());
+
   fs.writeFileSync(outputPath, buffer);
 }
 
+function parseModuleData(raw) {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function parseYouTubeStart(value) {
-  if (!value) return 0;
-  if (/^\d+$/.test(String(value))) return Number(value);
+  if (!value) {
+    return 0;
+  }
+
+  if (/^\d+$/.test(String(value))) {
+    return Number(value);
+  }
 
   const text = String(value);
   let seconds = 0;
@@ -80,12 +99,19 @@ function getYouTubeId(value) {
   const text = String(value || "");
 
   let match = text.match(/youtube\.com\/watch\?.*?v=([A-Za-z0-9_-]{6,})/i);
-  if (match) return match[1];
+
+  if (match) {
+    return match[1];
+  }
 
   match = text.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/i);
-  if (match) return match[1];
+
+  if (match) {
+    return match[1];
+  }
 
   match = text.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i);
+
   return match ? match[1] : null;
 }
 
@@ -95,130 +121,275 @@ function makeYouTubeIframe(id, start = 0) {
   return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
 }
 
-function protectYouTube($, root, store) {
-  root.find("script.__se_module_data").each((_, element) => {
+function cheerioLoadFragment(html) {
+  return cheerio.load(html, { decodeEntities: false }, false);
+}
+
+function findYouTubeIframe($, component) {
+  const existing = component.find("iframe").first();
+
+  if (existing.length && getYouTubeId(existing.attr("src"))) {
+    return $.html(existing);
+  }
+
+  for (const element of component.find("script.__se_module_data").toArray()) {
     const script = $(element);
-    const raw = script.attr("data-module-v2") || script.attr("data-module");
+    const raws = [script.attr("data-module-v2"), script.attr("data-module"), script.html()];
 
-    if (!raw) return;
+    for (const raw of raws) {
+      if (!raw) {
+        continue;
+      }
 
-    let data;
+      const data = parseModuleData(raw);
 
-    try {
-      data = JSON.parse(raw);
-    } catch {
+      if (data) {
+        const candidates = [data.html, data.data?.html, data.result?.html, data.oembed?.html];
+
+        for (const candidate of candidates) {
+          if (typeof candidate !== "string") {
+            continue;
+          }
+
+          const fragment = cheerioLoadFragment(candidate);
+          const iframe = fragment("iframe").first();
+
+          if (iframe.length && getYouTubeId(iframe.attr("src"))) {
+            return fragment.html(iframe);
+          }
+        }
+
+        const serialized = JSON.stringify(data);
+        const id = getYouTubeId(serialized);
+
+        if (id) {
+          const startMatch = serialized.match(/"(?:start|startTime|start_time)"\s*:\s*"?([^",}]+)"?/i);
+          return makeYouTubeIframe(id, startMatch ? parseYouTubeStart(startMatch[1]) : 0);
+        }
+      }
+
+      const id = getYouTubeId(raw);
+
+      if (id) {
+        return makeYouTubeIframe(id);
+      }
+    }
+  }
+
+  return "";
+}
+
+function restoreYouTubeEmbeds($, root) {
+  const components = root.find(".se-component.se-oembed, .se-oembed").toArray();
+
+  for (const element of components) {
+    const component = $(element);
+
+    if (component.hasClass("naver-local-youtube")) {
+      continue;
+    }
+
+    const iframe = findYouTubeIframe($, component);
+
+    if (!iframe) {
+      continue;
+    }
+
+    component.addClass("naver-local-youtube");
+    component.attr("data-youtube", "true");
+
+    const module = component.find(".se-module").first();
+
+    if (module.length) {
+      module.empty().append(iframe);
+    } else {
+      component.empty().append(iframe);
+    }
+  }
+}
+
+function protectYouTube($, root, store) {
+  const components = root.find(".naver-local-youtube").toArray();
+
+  for (const element of components) {
+    const component = $(element);
+    const iframe = component.find("iframe").first();
+
+    if (!iframe.length) {
+      continue;
+    }
+
+    component.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+  }
+
+  const rawComponents = root.find(".se-component.se-oembed").toArray();
+
+  for (const element of rawComponents) {
+    const component = $(element);
+    const iframe = findYouTubeIframe($, component);
+
+    if (!iframe) {
+      continue;
+    }
+
+    component.replaceWith(`<div class="naver-protected">${store.add(iframe)}</div>`);
+  }
+}
+
+function getVideoMetadataCandidates($, component) {
+  const candidates = [];
+  const seen = new Set();
+
+  function add(metadata) {
+    if (!metadata?.vid) {
       return;
     }
 
-    const serialized = JSON.stringify(data);
-    const id = getYouTubeId(serialized);
+    const normalized = {
+      vid: String(metadata.vid),
+      inKey: String(metadata.inKey || metadata.inkey || metadata.in_key || ""),
+      thumbnail: String(metadata.thumbnail || ""),
+      width: Number(metadata.width || metadata.originalWidth || 0),
+      height: Number(metadata.height || metadata.originalHeight || 0),
+    };
 
-    if (!id) return;
+    const key = `${normalized.vid}|${normalized.inKey}`;
 
-    const startMatch = serialized.match(/"(?:start|startTime|start_time)"\s*:\s*"?([^",}]+)"?/i);
-    const iframe = makeYouTubeIframe(id, startMatch ? parseYouTubeStart(startMatch[1]) : 0);
-    const token = store.add(iframe);
-    const component = script.closest(".se-component");
+    if (seen.has(key)) {
+      return;
+    }
 
-    if (component.length) component.replaceWith(`<div class="naver-protected">${token}</div>`);
-    else script.replaceWith(`<div class="naver-protected">${token}</div>`);
-  });
-}
+    seen.add(key);
+    candidates.push(normalized);
+  }
 
-function findVideoMetadata(value) {
-  const text = String(value || "");
-  const vid = text.match(/"(?:vid|videoId|video_id)"\s*:\s*"([^"]+)"/i);
-  const inKey = text.match(/"(?:inKey|inkey|in_key)"\s*:\s*"([^"]+)"/i);
+  for (const element of component.find("script.__se_module_data").toArray()) {
+    const script = $(element);
 
-  return vid ? { vid: vid[1], inKey: inKey ? inKey[1] : "" } : null;
+    for (const attr of ["data-module-v2", "data-module"]) {
+      const raw = script.attr(attr);
+      const parsed = parseModuleData(raw);
+      const data = parsed?.data;
+
+      if (!data?.vid) {
+        continue;
+      }
+
+      add({
+        vid: data.vid,
+        inKey: data.inkey || data.inKey || data.in_key || "",
+        thumbnail: data.thumbnail || "",
+        width: data.width || data.originalWidth || 0,
+        height: data.height || data.originalHeight || 0,
+      });
+    }
+  }
+
+  return candidates;
 }
 
 async function fetchVideoInfo(vid, inKey) {
-  const params = new URLSearchParams({ vid });
+  const params = new URLSearchParams({
+    key: inKey,
+    sid: "2",
+    nonce: String(Date.now()),
+    devt: "html5_pc",
+  });
 
-  if (inKey) params.set("inKey", inKey);
+  const url = `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${encodeURIComponent(vid)}?${params}`;
 
-  const response = await fetch(
-    `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${vid}?${params}`,
-    {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Referer: "https://blog.naver.com/",
-      },
-    }
-  );
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Referer: "https://blog.naver.com/",
+      Accept: "application/json, text/plain, */*",
+    },
+  });
 
-  if (!response.ok) throw new Error(`Naver VOD API 실패: ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`Naver VOD API 실패: ${response.status}`);
+  }
 
   return response.json();
 }
 
 function findBestMp4(data) {
-  const results = [];
+  const videos = data?.videos?.list;
 
-  function walk(value) {
-    if (!value) return;
-
-    if (Array.isArray(value)) {
-      value.forEach(walk);
-      return;
-    }
-
-    if (typeof value !== "object") return;
-
-    const src = value.source || value.url || value.src || "";
-    const type = value.type || value.mimeType || value.mime || "";
-
-    if (
-      typeof src === "string" &&
-      src.startsWith("http") &&
-      (/\.mp4(?:\?|$)/i.test(src) || /video\/mp4/i.test(type))
-    ) {
-      const width = Number(value.width || value.encodingWidth || value.videoWidth || 0);
-      const height = Number(value.height || value.encodingHeight || value.videoHeight || 0);
-      const bitrate = Number(value.bitrate || value.videoBitrate || 0);
-
-      results.push({
-        src,
-        score: width * height * 1000000 + bitrate,
-      });
-    }
-
-    Object.values(value).forEach(walk);
+  if (!Array.isArray(videos) || !videos.length) {
+    return "";
   }
 
-  walk(data);
+  const results = videos
+    .filter(video => typeof video.source === "string" && video.source.startsWith("http"))
+    .map(video => ({
+      src: video.source.replace(/∈/g, "&"),
+      size: Number(video.size || 0),
+      width: Number(video.encodingOption?.width || video.width || 0),
+      height: Number(video.encodingOption?.height || video.height || 0),
+      bitrate: Number(video.bitrate?.video || video.bitrate || 0),
+    }));
 
-  results.sort((a, b) => b.score - a.score);
+  results.sort((a, b) => {
+    const resolutionDiff = (b.width * b.height) - (a.width * a.height);
+
+    if (resolutionDiff !== 0) {
+      return resolutionDiff;
+    }
+
+    if (b.bitrate !== a.bitrate) {
+      return b.bitrate - a.bitrate;
+    }
+
+    return b.size - a.size;
+  });
 
   return results[0]?.src || "";
 }
 
 function findPoster(data) {
+  const candidates = [data?.meta?.cover?.source, data?.meta?.cover?.url, data?.thumbnail, data?.poster];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.startsWith("http")) {
+      return candidate;
+    }
+  }
+
   let result = "";
 
   function walk(value) {
-    if (result || !value) return;
-
-    if (Array.isArray(value)) {
-      value.forEach(walk);
+    if (result || !value) {
       return;
     }
 
-    if (typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        walk(child);
+
+        if (result) {
+          return;
+        }
+      }
+
+      return;
+    }
+
+    if (typeof value !== "object") {
+      return;
+    }
 
     for (const [key, child] of Object.entries(value)) {
-      if (
-        typeof child === "string" &&
-        child.startsWith("http") &&
-        /thumbnail|poster|cover/i.test(key) &&
-        /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)
-      ) {
+      if (typeof child === "string" && child.startsWith("http") && /thumbnail|poster|cover/i.test(key) && /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)) {
         result = child;
         return;
       }
 
       walk(child);
+
+      if (result) {
+        return;
+      }
     }
   }
 
@@ -227,70 +398,168 @@ function findPoster(data) {
   return result;
 }
 
-async function protectNaverVideos($, root, outputDir, store, imageManager) {
-  let index = 1;
-  const downloadedVideos = new Map();
+async function resolveNaverVideo(candidates) {
+  let lastError = null;
 
-  for (const element of root.find(".se-video, .se-component.se-video").toArray()) {
-    const component = $(element);
-    let metadata = null;
-
-    for (const script of component.find("script").toArray()) {
-      const node = $(script);
-      const raw = node.attr("data-module-v2") || node.attr("data-module") || node.html() || "";
-
-      metadata = findVideoMetadata(raw);
-
-      if (metadata) break;
-    }
-
-    if (!metadata) metadata = findVideoMetadata(component.html() || "");
-    if (!metadata) continue;
-
+  for (const metadata of candidates) {
     try {
+      console.log(`Naver 동영상 확인: ${metadata.vid} / ${metadata.inKey || "inkey 없음"}`);
+
       const info = await fetchVideoInfo(metadata.vid, metadata.inKey);
       const videoUrl = findBestMp4(info);
 
-      if (!videoUrl) continue;
+      if (!videoUrl) {
+        lastError = new Error("MP4 URL을 찾지 못함");
+        continue;
+      }
 
+      return {
+        metadata,
+        info,
+        videoUrl,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
+}
+
+function replaceNaverVideoPlayer($, component, videoHtml) {
+  const module = component.find(".se-module.se-module-video").first();
+
+  if (module.length) {
+    module.replaceWith(videoHtml);
+    return;
+  }
+
+  const section = component.find(".se-section.se-section-video").first();
+
+  if (section.length) {
+    section.empty().append(videoHtml);
+    return;
+  }
+
+  const content = component.find(".se-component-content").first();
+
+  if (content.length) {
+    content.empty().append(videoHtml);
+    return;
+  }
+
+  component.empty().append(videoHtml);
+}
+
+async function localizeNaverVideos($, root, outputDir, imageManager) {
+  let index = 1;
+
+  const downloadedVideos = new Map();
+  const components = root.find(".se-component.se-video").toArray();
+
+  for (const element of components) {
+    const component = $(element);
+
+    if (component.hasClass("naver-local-video")) {
+      continue;
+    }
+
+    const candidates = getVideoMetadataCandidates($, component);
+
+    if (!candidates.length) {
+      console.warn("Naver 동영상 메타데이터를 찾지 못함");
+      continue;
+    }
+
+    try {
+      const resolved = await resolveNaverVideo(candidates);
+
+      if (!resolved) {
+        continue;
+      }
+
+      const { metadata, info, videoUrl } = resolved;
       const number = String(index).padStart(3, "0");
+
       let videoFilename;
 
       if (downloadedVideos.has(videoUrl)) {
         videoFilename = downloadedVideos.get(videoUrl);
       } else {
         videoFilename = getFilenameFromUrl(videoUrl, `video-${number}.mp4`);
+
+        if (!path.extname(videoFilename)) {
+          videoFilename += ".mp4";
+        }
+
         videoFilename = getUniqueFilename(outputDir, videoFilename);
 
+        console.log(`동영상 다운로드: ${videoFilename}`);
+
         await downloadFile(videoUrl, path.join(outputDir, videoFilename));
+
         downloadedVideos.set(videoUrl, videoFilename);
       }
 
-      let poster = "";
-      const posterUrl = findPoster(info);
+      let posterFilename = "";
+      const posterUrl = findPoster(info) || metadata.thumbnail;
 
-      if (posterUrl) {
+      if (posterUrl && imageManager?.download) {
         try {
-          const posterFilename = await imageManager.download(posterUrl, {
+          posterFilename = await imageManager.download(posterUrl, {
             fallbackPrefix: "video-thumb",
           });
-
-          if (posterFilename) poster = ` poster="${posterFilename}"`;
-        } catch {}
+        } catch (error) {
+          console.warn(`동영상 썸네일 다운로드 실패: ${error.message}`);
+        }
       }
 
-      const html = `<video controls style="width:100%;height:auto;"${poster}><source src="${videoFilename}" type="video/mp4"></video>`;
+      const poster = posterFilename ? ` poster="./${posterFilename}"` : "";
+      const width = metadata.width || 500;
+      const height = metadata.height || 281;
 
-      component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+      const videoHtml = `
+        <video controls preload="metadata" width="${width}" height="${height}"${poster}>
+          <source src="./${videoFilename}" type="video/mp4">
+        </video>
+      `;
+
+      component.addClass("naver-local-video");
+      component.attr("data-naver-video", "true");
+
+      replaceNaverVideoPlayer($, component, videoHtml);
+
+      console.log(`동영상 로컬화 완료: ${videoFilename} (${width}x${height})`);
 
       index++;
-    } catch {
-      console.warn(`동영상 다운로드 실패: ${metadata.vid}`);
+    } catch (error) {
+      console.warn(`동영상 다운로드 실패: ${candidates[0]?.vid || "unknown"} - ${error.message}`);
     }
   }
 }
 
+function protectNaverVideos($, root, store) {
+  const videos = root.find(".naver-local-video").toArray();
+
+  for (const element of videos) {
+    const component = $(element);
+    const video = component.find("video").first();
+
+    if (!video.length) {
+      continue;
+    }
+
+    component.replaceWith(`<div class="naver-protected">${store.add($.html(video))}</div>`);
+  }
+}
+
 module.exports = {
+  restoreYouTubeEmbeds,
   protectYouTube,
+  localizeNaverVideos,
   protectNaverVideos,
 };

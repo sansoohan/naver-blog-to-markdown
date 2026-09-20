@@ -2,16 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const cheerio = require("cheerio");
-const TurndownService = require("turndown");
 
-const { protectAttachments } = require("./src/attachment");
-const { protectTextComponents } = require("./src/paragraph");
-const { protectTables } = require("./src/table");
-const { protectYouTube, protectNaverVideos } = require("./src/video");
-const { protectQuotes } = require("./src/quote");
-const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
-const { protectCodeBlocks } = require("./src/code");
-const { createImageManager, localizeImages, getImageSource } = require("./src/image");
+const { makeHtml, getPostRoot } = require("./make-html");
+const { makeMarkdown } = require("./make-markdown");
 
 function parsePostUrl(url) {
   const parsed = new URL(url);
@@ -28,7 +21,9 @@ function parsePostUrl(url) {
     }
   }
 
-  if (!blogId || !logNo) throw new Error("네이버 블로그 글 URL을 확인할 수 없습니다.");
+  if (!blogId || !logNo) {
+    throw new Error("네이버 블로그 글 URL을 확인할 수 없습니다.");
+  }
 
   return { blogId, logNo };
 }
@@ -38,116 +33,6 @@ function safeFilename(value) {
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
     .replace(/[. ]+$/g, "")
     .trim() || "untitled";
-}
-
-function escapeHtmlText(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeHtmlAttribute(value) {
-  return escapeHtmlText(value)
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function createStore() {
-  let index = 0;
-  const values = new Map();
-
-  return {
-    add(value) {
-      const token = `NAVERPLACEHOLDER${String(++index).padStart(8, "0")}END`;
-      values.set(token, String(value));
-      return token;
-    },
-
-    restore(text) {
-      let result = String(text);
-      for (const [token, value] of values) result = result.split(token).join(value);
-      return result;
-    },
-  };
-}
-
-function createTurndown() {
-  const turndown = new TurndownService({
-    headingStyle: "atx",
-    bulletListMarker: "-",
-    codeBlockStyle: "fenced",
-    emDelimiter: "*",
-    strongDelimiter: "**",
-  });
-
-  turndown.addRule("protected", {
-    filter(node) {
-      return node.nodeName === "DIV" && node.classList.contains("naver-protected");
-    },
-
-    replacement(content, node) {
-      return `\n\n${node.textContent}\n\n`;
-    },
-  });
-
-  turndown.addRule("lineBreak", {
-    filter: "br",
-
-    replacement() {
-      return "<br>";
-    },
-  });
-
-  return turndown;
-}
-
-function restoreEmptyLines(markdown) {
-  return String(markdown)
-    .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
-    .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
-    .replace(/NAVEREMPTYLINE/g, "<br>")
-    .replace(/<br>[ \t]*\n(?=```)/g, "<br>\n\n");
-}
-
-function cleanMarkdown(markdown) {
-  return String(markdown)
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{4,}/g, "\n\n\n")
-    .trim();
-}
-
-async function protectOgCards($, root, imageManager, store) {
-  const cards = root.find(".se-component.se-oglink").toArray();
-
-  for (const element of cards) {
-    const component = $(element);
-    const link = component.find("a").first();
-    const href = link.attr("href") || "";
-    const title = component.find(".se-oglink-title").first().text().trim();
-    const summary = component.find(".se-oglink-summary").first().text().trim();
-    const domain = component.find(".se-oglink-url").first().text().trim();
-    const image = component.find("img").first();
-    const imageSource = image.length ? getImageSource(image) : "";
-
-    let thumbnail = "";
-
-    if (imageSource) {
-      try {
-        const filename = await imageManager.download(imageSource, { fallbackPrefix: "thumb" });
-        if (filename) thumbnail = `./${filename}`;
-      } catch {}
-    }
-
-    const imageHtml = thumbnail ? `<td style="width:120px;padding:0 12px 0 0;vertical-align:middle;"><img src="${escapeHtmlAttribute(thumbnail)}" style="width:120px;height:auto;"></td>` : "";
-    const titleHtml = title ? `<div style="font-weight:700;margin-bottom:4px;">${escapeHtmlText(title)}</div>` : "";
-    const summaryHtml = summary ? `<div style="margin-bottom:4px;">${escapeHtmlText(summary)}</div>` : "";
-    const domainHtml = domain ? `<div style="font-size:0.9em;">${escapeHtmlText(domain)}</div>` : "";
-    const content = `<table style="width:100%;border-collapse:collapse;background:transparent;"><tr>${imageHtml}<td style="vertical-align:middle;"><a href="${escapeHtmlAttribute(href)}" target="_blank" style="text-decoration:none;">${titleHtml}${summaryHtml}${domainHtml}</a></td></tr></table>`;
-
-    component.replaceWith(`<div class="naver-protected">${store.add(content)}</div>`);
-  }
 }
 
 function getPostTitle($) {
@@ -164,19 +49,6 @@ function getPostCategory($) {
     || "uncategorized";
 }
 
-function getPostRoot($) {
-  const smartEditor = $(".se-main-container").first();
-  if (smartEditor.length) return smartEditor;
-
-  const postView = $("#postViewArea").first();
-  if (postView.length) return postView;
-
-  const legacy = $(".se3_view").first();
-  if (legacy.length) return legacy;
-
-  throw new Error("본문 영역을 찾을 수 없습니다.");
-}
-
 async function getPost(blogId, logNo) {
   const url = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${encodeURIComponent(logNo)}`;
 
@@ -187,7 +59,9 @@ async function getPost(blogId, logNo) {
     },
   });
 
-  if (!response.ok) throw new Error(`게시글 요청 실패: ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`게시글 요청 실패: ${response.status}`);
+  }
 
   return response.text();
 }
@@ -195,15 +69,24 @@ async function getPost(blogId, logNo) {
 function createContentHash(root) {
   const clone = root.clone();
 
-  clone.find(".se-component.se-file a.se-file-save-button").removeAttr("href").removeAttr("data-linkdata");
-  clone.find(".se-component.se-file script.__se_module_data").removeAttr("data-module").removeAttr("data-module-v2");
-  clone.find("pzp-pc-layout._naverVideo").removeAttr("key");
+  clone.find(".se-component.se-file a.se-file-save-button")
+    .removeAttr("href")
+    .removeAttr("data-linkdata");
+
+  clone.find(".se-component.se-file script.__se_module_data")
+    .removeAttr("data-module")
+    .removeAttr("data-module-v2");
+
+  clone.find("pzp-pc-layout._naverVideo")
+    .removeAttr("key");
 
   clone.find("a.videoplayer_popup_link").each((_, element) => {
     const link = clone.find(element);
     const href = link.attr("href");
 
-    if (href) link.attr("href", href.replace(/([?&]hashKey=)[^&"]*/i, "$1"));
+    if (href) {
+      link.attr("href", href.replace(/([?&]hashKey=)[^&"]*/i, "$1"));
+    }
   });
 
   return crypto.createHash("sha256").update(clone.html() || "").digest("hex");
@@ -216,7 +99,9 @@ function getCacheFile() {
 function loadCache() {
   const file = getCacheFile();
 
-  if (!fs.existsSync(file)) return {};
+  if (!fs.existsSync(file)) {
+    return {};
+  }
 
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -235,8 +120,14 @@ function saveCache(cache) {
 }
 
 function removeDirectory(directory) {
-  if (!directory || !fs.existsSync(directory)) return;
-  fs.rmSync(directory, { recursive: true, force: true });
+  if (!directory || !fs.existsSync(directory)) {
+    return;
+  }
+
+  fs.rmSync(directory, {
+    recursive: true,
+    force: true,
+  });
 }
 
 function sleep(ms) {
@@ -253,7 +144,9 @@ async function renameDirectory(source, destination) {
     } catch (error) {
       lastError = error;
 
-      if (error.code !== "EPERM" && error.code !== "EBUSY") throw error;
+      if (error.code !== "EPERM" && error.code !== "EBUSY") {
+        throw error;
+      }
 
       await sleep(200 * (attempt + 1));
     }
@@ -262,14 +155,21 @@ async function renameDirectory(source, destination) {
   throw lastError;
 }
 
+function saveDebugRaw(html) {
+  fs.writeFileSync(path.join(process.cwd(), "debug-raw.html"), html, "utf8");
+}
+
 async function convertPost(url, options = {}) {
   const { skipUnchanged = false } = options;
   const { blogId, logNo } = parsePostUrl(url);
 
   console.log(`가져오는 중: ${blogId}/${logNo}`);
 
-  const html = await getPost(blogId, logNo);
-  const $ = cheerio.load(html, { decodeEntities: false });
+  const rawHtml = await getPost(blogId, logNo);
+
+  saveDebugRaw(rawHtml);
+
+  const $ = cheerio.load(rawHtml, { decodeEntities: false });
 
   const title = getPostTitle($);
   const category = getPostCategory($);
@@ -300,43 +200,41 @@ async function convertPost(url, options = {}) {
   fs.mkdirSync(tempOutputDir, { recursive: true });
 
   try {
-    const store = createStore();
-    const imageManager = createImageManager(tempOutputDir);
+    console.log("HTML 만드는 중...");
 
-    await protectAttachments($, root, tempOutputDir, store);
-    await protectNaverVideos($, root, tempOutputDir, store, imageManager);
-    await protectOgCards($, root, imageManager, store);
-    await localizeImages($, root, imageManager);
+    const originalHtml = await makeHtml(rawHtml, tempOutputDir);
 
-    protectYouTube($, root, store);
-    protectTables($, root, store);
-    protectQuotes($, root, store);
+    fs.writeFileSync(
+      path.join(tempOutputDir, "original.html"),
+      originalHtml,
+      "utf8"
+    );
 
-    const horizontalLineTypes = protectHorizontalLines($, root, store);
+    console.log("Markdown 만드는 중...");
 
-    protectCodeBlocks($, root, store);
-    protectTextComponents($, root, store);
+    const markdown = makeMarkdown(originalHtml, {
+      title,
+      blogId,
+      logNo,
+    });
 
-    const turndown = createTurndown();
-
-    let markdown = turndown.turndown(root.html() || "");
-    markdown = store.restore(markdown);
-    markdown = restoreEmptyLines(markdown);
-    markdown = cleanMarkdown(markdown);
-
-    const header = `# ${title}\n\n> 원본: https://blog.naver.com/${blogId}/${logNo}`;
-    const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
-    const finalMarkdown = `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
-
-    fs.writeFileSync(path.join(tempOutputDir, "index.md"), finalMarkdown, "utf8");
+    fs.writeFileSync(
+      path.join(tempOutputDir, "index.md"),
+      markdown,
+      "utf8"
+    );
 
     if (previous?.path) {
       const previousDir = path.resolve(process.cwd(), previous.path);
-      if (previousDir !== path.resolve(finalOutputDir)) removeDirectory(previousDir);
+
+      if (previousDir !== path.resolve(finalOutputDir)) {
+        removeDirectory(previousDir);
+      }
     }
 
     removeDirectory(finalOutputDir);
     fs.mkdirSync(path.dirname(finalOutputDir), { recursive: true });
+
     await renameDirectory(tempOutputDir, finalOutputDir);
 
     const relativePath = path.relative(process.cwd(), finalOutputDir);
@@ -352,9 +250,11 @@ async function convertPost(url, options = {}) {
 
     saveCache(cache);
 
-    const finalOutputFile = path.join(finalOutputDir, "index.md");
+    const finalHtmlFile = path.join(finalOutputDir, "original.html");
+    const finalMarkdownFile = path.join(finalOutputDir, "index.md");
 
-    console.log(`완료: ${finalOutputFile}`);
+    console.log(`HTML 완료: ${finalHtmlFile}`);
+    console.log(`Markdown 완료: ${finalMarkdownFile}`);
 
     return {
       status: previous ? "updated" : "new",
@@ -395,4 +295,6 @@ module.exports = {
   getPostRoot,
 };
 
-if (require.main === module) main();
+if (require.main === module) {
+  main();
+}
