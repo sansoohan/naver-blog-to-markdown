@@ -30,14 +30,7 @@ function getCodeLayout(component) {
 }
 
 function getCodeContainer(component) {
-  const selectors = [
-    ".__se_code_view",
-    ".se-code-source",
-    "pre",
-    "code",
-    ".se-module-code",
-    ".se-code",
-  ];
+  const selectors = [".__se_code_view", ".se-code-source", "pre", "code", ".se-module-code", ".se-code"];
 
   for (const selector of selectors) {
     if (component.is(selector)) return component;
@@ -61,9 +54,7 @@ function getStructuredCodeText($, container) {
 
     if (!lines.length) continue;
 
-    return lines
-      .map(element => normalizeNewlines($(element).text()).replace(/\n/g, ""))
-      .join("\n");
+    return lines.map(element => normalizeNewlines($(element).text()).replace(/\n/g, "")).join("\n");
   }
 
   return null;
@@ -143,9 +134,7 @@ function protectCodeBlocks($, root, store) {
     const code = getCodeText($, component);
     const markdown = makeCodeMarkdown(layout, code);
 
-    component.replaceWith(
-      `<div class="naver-protected">${store.add(markdown)}</div>`,
-    );
+    component.replaceWith(`<div class="naver-protected">${store.add(markdown)}</div>`);
   }
 
   /*
@@ -162,9 +151,7 @@ function protectCodeBlocks($, root, store) {
     const code = getCodeText($, section);
     const markdown = makeCodeMarkdown(layout, code);
 
-    section.replaceWith(
-      `<div class="naver-protected">${store.add(markdown)}</div>`,
-    );
+    section.replaceWith(`<div class="naver-protected">${store.add(markdown)}</div>`);
   }
 }
 

@@ -15,69 +15,87 @@ function getPostRoot($, editorVersion) {
    */
   if (editorVersion === 1) {
     const postViewArea = $("#postViewArea").first();
+
     if (postViewArea.length) return postViewArea;
   }
 
   /*
    * SmartEditor 2.0:
-   * 원본 PostView.css가 적용될 수 있도록 #postViewArea 구조를 유지한다.
+   * 1.0과 마찬가지로 원본 PostView.css가 적용될 수 있게 #postViewArea 구조를 유지한다.
    */
   if (editorVersion === 2) {
     const postViewArea = $("#postViewArea").first();
+
     if (postViewArea.length) return postViewArea;
 
     const legacy = $(".se3_view").first();
+
     if (legacy.length) return legacy;
   }
 
   const smartEditor = $(".se-main-container").first();
+
   if (smartEditor.length) return smartEditor;
 
   const postView = $("#postViewArea").first();
+
   if (postView.length) return postView;
 
   const legacy = $(".se3_view").first();
+
   if (legacy.length) return legacy;
 
   throw new Error("본문 영역을 찾을 수 없습니다.");
 }
 
+function normalizeEditorVersion(value) {
+  const version = Number(value);
+
+  if (!Number.isInteger(version) || version < 1) return 0;
+
+  /*
+   * 네이버 메타데이터에는 4 이상의 값이 들어올 수 있지만,
+   * 별도의 SmartEditor 4 문서 구조가 아니라 SmartEditor ONE 계열이다.
+   * 따라서 SmartEditor 3으로 통합해서 처리한다.
+   */
+  return version >= 3 ? 3 : version;
+}
+
 function detectEditorVersion($) {
   const html = $.html();
   const socialPluginInfo = $("#socialPluginInfoJson").text();
-  const socialMatch = socialPluginInfo.match(/\bsmartEditorVersion["']?\s*:\s*["']?(\d+)["']?/i);
-
-  if (socialMatch) return Number(socialMatch[1]);
-
-  const htmlMatch = html.match(
-    /\bsmartEditorVersion(?:&(?:quot|#034);|["'])?\s*:\s*["']?(\d+)["']?/i,
+  const socialMatch = socialPluginInfo.match(
+    /\bsmartEditorVersion["']?\s*:\s*["']?(\d+)["']?/i
   );
 
-  if (htmlMatch) return Number(htmlMatch[1]);
+  if (socialMatch) return normalizeEditorVersion(socialMatch[1]);
+
+  const match = html.match(
+    /\bsmartEditorVersion(?:&(?:quot|#034);|["'])?\s*:\s*["']?(\d+)["']?/i
+  );
+
+  if (match) return normalizeEditorVersion(match[1]);
 
   const baseInfoMatch = html.match(
-    /aPostBaseInfo\s*\[\s*\d+\s*]\s*=\s*["']([^"']+)["']/i,
+    /aPostBaseInfo\s*\[\s*\d+\s*]\s*=\s*["']([^"']+)["']/i
   );
 
   if (baseInfoMatch) {
     const fields = baseInfoMatch[1].split("|");
     const version = Number(fields[7]);
 
-    if (Number.isInteger(version) && version > 0) return version;
+    if (Number.isInteger(version) && version > 0) {
+      return normalizeEditorVersion(version);
+    }
   }
 
-  /*
-   * SmartEditor 1.0:
-   * 명시적인 버전 정보가 없을 때 초기 에디터의 본문 구조를 확인한다.
-   */
+  /* SmartEditor 1.0: 초기 에디터의 .post-view > .view 본문 구조를 확인한다. */
   if ($("#postViewArea .post-view > .view").length) return 1;
 
+  /* SmartEditor ONE: .se-main-container 본문 구조를 사용한다. */
   if ($(".se-main-container").length) return 3;
 
-  /*
-   * SmartEditor 2.0:
-   * 명시적인 버전 정보 없이 기존 PostView 구조만 확인되는 경우다.
-   */
+  /* SmartEditor 2.0: 구형 #postViewArea 또는 .se3_view 구조를 사용한다. */
   if ($("#postViewArea, .se3_view").length) return 2;
 
   return 0;
@@ -89,12 +107,13 @@ function getViewerCssInfo($, editorVersion) {
   $("link[rel~='stylesheet'][href]").each((_, element) => {
     const href = $(element).attr("href") || "";
 
-    if (
-      (editorVersion === 3 || editorVersion === 4)
-      && /se\.viewer\.desktop(?:\.min)?\.css/i.test(href)
-    ) {
+    /*
+     * SmartEditor ONE:
+     * se.viewer.desktop.css 또는 압축된 변형을 사용한다.
+     */
+    if (editorVersion === 3 && /se\.viewer\.desktop(?:\.min)?\.css/i.test(href)) {
       result = {
-        url: new URL(href, "https://blog.naver.com/").href,
+        url: href,
         filename: "se.viewer.desktop.css",
       };
 
@@ -102,12 +121,15 @@ function getViewerCssInfo($, editorVersion) {
     }
 
     /*
-     * SmartEditor 1.0:
-     * 원문에 연결된 버전별 PostView CSS를 그대로 사용한다.
+     * SmartEditor 2.0:
+     * PostView.css 또는 postview 계열 CSS를 사용한다.
      */
-    if (editorVersion === 1 && /\/PostView-[^/?#]+\.css(?:[?#]|$)/i.test(href)) {
+    if (
+      editorVersion === 2
+      && /(?:PostView|postview|smart_editor2).*\.css/i.test(href)
+    ) {
       result = {
-        url: new URL(href, "https://blog.naver.com/").href,
+        url: href,
         filename: "PostView.css",
       };
 
@@ -115,198 +137,166 @@ function getViewerCssInfo($, editorVersion) {
     }
 
     /*
-     * SmartEditor 2.0:
-     * 원문에 연결된 버전별 PostView CSS를 그대로 사용한다.
+     * SmartEditor 1.0:
+     * 초기 글의 PostView.css를 사용한다.
      */
-    if (editorVersion === 2 && /\/PostView-[^/?#]+\.css(?:[?#]|$)/i.test(href)) {
+    if (
+      editorVersion === 1
+      && /(?:PostView|postview|smart_editor).*\.css/i.test(href)
+    ) {
       result = {
-        url: new URL(href, "https://blog.naver.com/").href,
+        url: href,
         filename: "PostView.css",
       };
 
       return false;
     }
-  });
 
-  return result;
-}
-
-function resolveUrl(value, baseUrl) {
-  try {
-    return new URL(value, baseUrl).href;
-  } catch {
-    return value;
-  }
-}
-
-function rewriteCssUrls(css, cssUrl) {
-  return String(css).replace(
-    /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
-    (match, quote, value) => {
-      const url = value.trim();
-
-      if (!url || /^(?:data:|https?:|\/\/|#)/i.test(url)) return match;
-
-      return `url("${resolveUrl(url, cssUrl)}")`;
-    },
-  );
-}
-
-function rewriteCssImports(css, cssUrl) {
-  return String(css).replace(
-    /@import\s+(?:url\(\s*)?(['"])(.*?)\1\s*\)?/gi,
-    (match, quote, value) => {
-      const url = value.trim();
-
-      if (!url || /^(?:data:|https?:|\/\/)/i.test(url)) return match;
-
-      return match.replace(value, resolveUrl(value, cssUrl));
-    },
-  );
-}
-
-async function downloadViewerCss($, outputDir, editorVersion) {
-  const cssInfo = getViewerCssInfo($, editorVersion);
-
-  if (!cssInfo) {
-    console.warn(`에디터 v${editorVersion || "?"} CSS를 찾지 못함`);
-    return "";
-  }
-
-  console.log(`에디터 v${editorVersion} CSS: ${cssInfo.url}`);
-
-  const response = await fetch(cssInfo.url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://blog.naver.com/",
-      Accept: "text/css,*/*;q=0.1",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `에디터 v${editorVersion} CSS 다운로드 실패: ${response.status} ${cssInfo.url}`,
-    );
-  }
-
-  let css = await response.text();
-
-  css = rewriteCssImports(css, cssInfo.url);
-  css = rewriteCssUrls(css, cssInfo.url);
-
-  fs.writeFileSync(path.join(outputDir, cssInfo.filename), css, "utf8");
-
-  console.log(`에디터 v${editorVersion} CSS 저장: ${cssInfo.filename}`);
-
-  return cssInfo.filename;
-}
-
-function getContentAreaWidth($) {
-  const contentArea = $("#content-area").first();
-  const inlineStyle = contentArea.attr("style") || "";
-  const inlineMatch = inlineStyle.match(/\bwidth\s*:\s*([^;]+)/i);
-
-  if (inlineMatch) return inlineMatch[1].trim();
-
-  let result = "";
-
-  $("style").each((_, element) => {
-    const css = $(element).html() || "";
-    const rules = css.match(/#content-area\s*\{[^}]*\}/gi) || [];
-
-    for (const rule of rules) {
-      const widthMatch = rule.match(/\bwidth\s*:\s*([^;}]+)/i);
-      if (widthMatch) result = widthMatch[1].trim();
-    }
+    return undefined;
   });
 
   if (result) return result;
 
-  const bodyClass = $("body").attr("class") || "";
-  const bodyWidthMatch = bodyClass.match(/\bcontw-(\d+(?:\.\d+)?)\b/i);
+  const html = $.html();
 
-  if (bodyWidthMatch) return `${bodyWidthMatch[1]}px`;
+  if (editorVersion === 3) {
+    const match = html.match(
+      /https?:\/\/[^"'\\\s<>]+\/se\.viewer\.desktop(?:\.min)?\.css[^"'\\\s<>]*/i
+    );
 
-  return "";
-}
-
-function getWrapperPath(root) {
-  const wrappers = [];
-  let current = root.parent();
-
-  while (
-    current.length
-    && current[0].tagName !== "body"
-    && current[0].tagName !== "html"
-  ) {
-    const element = current[0];
-    const tagName = String(element.tagName || "").toLowerCase();
-
-    if (!tagName) break;
-
-    wrappers.unshift({
-      tagName,
-      attributes: { ...element.attribs },
-    });
-
-    current = current.parent();
-  }
-
-  return wrappers;
-}
-
-function sanitizeWrapperAttributes(attributes) {
-  const result = {};
-
-  for (const [name, value] of Object.entries(attributes || {})) {
-    const lowerName = name.toLowerCase();
-
-    if (lowerName.startsWith("on")) continue;
-
-    if (
-      lowerName === "style"
-      || lowerName === "class"
-      || lowerName === "id"
-      || lowerName.startsWith("data-")
-    ) {
-      result[name] = value;
+    if (match) {
+      return {
+        url: match[0].replace(/&amp;/g, "&"),
+        filename: "se.viewer.desktop.css",
+      };
     }
   }
 
-  return result;
-}
+  if (editorVersion === 1 || editorVersion === 2) {
+    const match = html.match(
+      /https?:\/\/[^"'\\\s<>]+\/(?:PostView|postview)[^"'\\\s<>]*\.css[^"'\\\s<>]*/i
+    );
 
-function escapeAttribute(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function makeAttributeString(attributes) {
-  const entries = Object.entries(attributes || {});
-
-  if (!entries.length) return "";
-
-  return entries.map(([name, value]) => {
-    return ` ${name}="${escapeAttribute(value)}"`;
-  }).join("");
-}
-
-function wrapPostBody(body, wrappers) {
-  let result = body;
-
-  for (let i = wrappers.length - 1; i >= 0; i--) {
-    const wrapper = wrappers[i];
-    const attributes = sanitizeWrapperAttributes(wrapper.attributes);
-
-    result = `<${wrapper.tagName}${makeAttributeString(attributes)}>
-      ${result}
-    </${wrapper.tagName}>`;
+    if (match) {
+      return {
+        url: match[0].replace(/&amp;/g, "&"),
+        filename: "PostView.css",
+      };
+    }
   }
 
-  return result;
+  return null;
+}
+
+function normalizeUrl(url) {
+  const value = String(url || "").replace(/&amp;/g, "&").trim();
+
+  if (!value) return "";
+  if (value.startsWith("//")) return `https:${value}`;
+
+  return value;
+}
+
+async function downloadViewerCss($, outputDir, editorVersion) {
+  const info = getViewerCssInfo($, editorVersion);
+
+  if (!info) {
+    console.warn(`에디터 v${editorVersion} CSS 주소를 찾지 못함`);
+    return "";
+  }
+
+  const url = normalizeUrl(info.url);
+
+  console.log(`에디터 v${editorVersion} CSS: ${url}`);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Referer: "https://blog.naver.com/",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    let css = await response.text();
+
+    /*
+     * CSS 안의 상대 URL이 로컬 HTML에서도 동작하도록
+     * CSS 원본 주소를 기준으로 절대 URL로 변경한다.
+     */
+    css = css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (match, quote, value) => {
+      const source = String(value).trim();
+
+      if (
+        !source
+        || source.startsWith("data:")
+        || source.startsWith("blob:")
+        || source.startsWith("#")
+      ) {
+        return match;
+      }
+
+      try {
+        return `url("${new URL(source, url)}")`;
+      } catch {
+        return match;
+      }
+    });
+
+    fs.writeFileSync(path.join(outputDir, info.filename), css, "utf8");
+    console.log(`에디터 v${editorVersion} CSS 저장: ${info.filename}`);
+
+    return info.filename;
+  } catch (error) {
+    console.warn(`에디터 CSS 다운로드 실패: ${error.message}`);
+    return "";
+  }
+}
+
+function getContentAreaWidth($) {
+  const selectors = [
+    "#content-area",
+    "#post-area",
+    ".post-area",
+    ".se-main-container",
+    "#postViewArea",
+  ];
+
+  for (const selector of selectors) {
+    const element = $(selector).first();
+
+    if (!element.length) continue;
+
+    const style = element.attr("style") || "";
+    const styleMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i);
+
+    if (styleMatch) return `${styleMatch[1]}px`;
+
+    const width = element.attr("data-width") || element.attr("width");
+
+    if (/^\d+(?:\.\d+)?$/.test(String(width || ""))) {
+      return `${width}px`;
+    }
+  }
+
+  const html = $.html();
+
+  const patterns = [
+    /contentAreaWidth\s*[:=]\s*["']?(\d+(?:\.\d+)?)/i,
+    /contentWidth\s*[:=]\s*["']?(\d+(?:\.\d+)?)/i,
+    /postWidth\s*[:=]\s*["']?(\d+(?:\.\d+)?)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match) return `${match[1]}px`;
+  }
+
+  return "";
 }
 
 function getBodyAttributes($) {
@@ -314,154 +304,135 @@ function getBodyAttributes($) {
 
   if (!body.length) return {};
 
-  return sanitizeWrapperAttributes(body[0].attribs);
-}
+  const result = {};
 
-function removeUnsafeWrapperIds(wrappers, editorVersion) {
-  const allowedIds = new Set(["content-area"]);
-
-  /*
-   * SmartEditor 1.0:
-   * PostView.css의 #post-area 선택자가 작동하도록 ID를 보존한다.
-   */
-  if (editorVersion === 1) allowedIds.add("post-area");
-
-  /*
-   * SmartEditor 2.0:
-   * PostView.css의 #post-area 선택자가 작동하도록 ID를 보존한다.
-   */
-  if (editorVersion === 2) allowedIds.add("post-area");
-
-  return wrappers.map(wrapper => {
-    const attributes = { ...wrapper.attributes };
-
-    if (attributes.id && !allowedIds.has(attributes.id)) {
-      delete attributes.id;
+  for (const [name, value] of Object.entries(body.attr() || {})) {
+    if (name === "class" || name === "style" || name.startsWith("data-")) {
+      result[name] = value;
     }
+  }
 
-    return {
-      ...wrapper,
-      attributes,
-    };
-  });
+  return result;
 }
 
-function trimWrapperPath(wrappers, editorVersion) {
-  const contentAreaIndex = wrappers.findIndex(wrapper => {
-    return wrapper.attributes?.id === "content-area";
-  });
+function getElementDescriptor(element) {
+  if (!element || element.type !== "tag") return null;
 
-  const postAreaIndex = wrappers.findIndex(wrapper => {
-    return wrapper.attributes?.id === "post-area";
-  });
+  const attributes = {};
 
-  /*
-   * SmartEditor 1.0:
-   * PostView.css에는 #post-area 등 조상 요소를 포함한 선택자가 있으므로
-   * #content-area부터 #postViewArea 직전까지 실제 래퍼 경로를 유지한다.
-   */
-  if (editorVersion === 1) {
-    if (contentAreaIndex >= 0) return wrappers.slice(contentAreaIndex);
-    if (postAreaIndex >= 0) return wrappers.slice(postAreaIndex);
-
-    return wrappers;
+  for (const [name, value] of Object.entries(element.attribs || {})) {
+    if (
+      name === "id"
+      || name === "class"
+      || name === "style"
+      || name.startsWith("data-")
+    ) {
+      attributes[name] = value;
+    }
   }
 
-  /*
-   * SmartEditor 2.0:
-   * PostView.css가 #post-area 등 기존 블로그 래퍼를 기준으로 적용되므로
-   * #content-area부터 #postViewArea 직전까지 실제 래퍼 경로를 유지한다.
-   */
-  if (editorVersion === 2) {
-    if (contentAreaIndex >= 0) return wrappers.slice(contentAreaIndex);
-    if (postAreaIndex >= 0) return wrappers.slice(postAreaIndex);
-
-    return wrappers;
-  }
-
-  const viewerIndex = wrappers.findIndex(wrapper => {
-    const className = wrapper.attributes?.class || "";
-
-    return /\bse-viewer\b/i.test(className);
-  });
-
-  if (contentAreaIndex >= 0 && viewerIndex >= 0) {
-    return [
-      wrappers[contentAreaIndex],
-      ...wrappers.slice(viewerIndex),
-    ];
-  }
-
-  if (viewerIndex >= 0) return wrappers.slice(viewerIndex);
-  if (contentAreaIndex >= 0) return [wrappers[contentAreaIndex]];
-
-  return [];
+  return {
+    tagName: element.tagName || element.name || "div",
+    attributes,
+  };
 }
 
 function prepareWrapperPath(root, editorVersion) {
-  const wrappers = getWrapperPath(root);
-  const trimmed = trimWrapperPath(wrappers, editorVersion);
+  const wrappers = [];
+  let current = root.get(0)?.parent;
 
-  return removeUnsafeWrapperIds(trimmed, editorVersion);
+  while (current && current.type === "tag") {
+    const descriptor = getElementDescriptor(current);
+
+    if (descriptor) wrappers.unshift(descriptor);
+
+    if (
+      current.tagName === "body"
+      || current.name === "body"
+      || wrappers.length >= 8
+    ) {
+      break;
+    }
+
+    current = current.parent;
+  }
+
+  /*
+   * SmartEditor 1.0과 2.0은 getPostRoot()가 #postViewArea 자체를 반환한다.
+   * 따라서 wrapper에 #postViewArea를 다시 추가하지 않는다.
+   */
+  if (editorVersion === 1 || editorVersion === 2) {
+    return wrappers.filter(wrapper => wrapper.attributes.id !== "postViewArea");
+  }
+
+  return wrappers;
 }
 
-function setStyleProperty(style, property, value) {
-  const declarations = String(style || "")
-    .split(";")
-    .map(item => item.trim())
-    .filter(Boolean);
+function makeAttributeString(attributes) {
+  return Object.entries(attributes)
+    .map(([name, value]) => {
+      const escaped = String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;");
 
-  const filtered = declarations.filter(declaration => {
-    const index = declaration.indexOf(":");
+      return ` ${name}="${escaped}"`;
+    })
+    .join("");
+}
 
-    if (index < 0) return true;
+function wrapPostBody(body, wrappers) {
+  let result = body;
 
-    const name = declaration.slice(0, index).trim();
+  for (let index = wrappers.length - 1; index >= 0; index--) {
+    const wrapper = wrappers[index];
+    const attributes = makeAttributeString(wrapper.attributes);
 
-    return name.toLowerCase() !== property.toLowerCase();
-  });
+    result = `<${wrapper.tagName}${attributes}>${result}</${wrapper.tagName}>`;
+  }
 
-  filtered.push(`${property}:${value}`);
-
-  return `${filtered.join(";")};`;
+  return `<main id="content-area">${result}</main>`;
 }
 
 function applyContentAreaWidth(wrappers, width) {
-  if (!width) return wrappers;
+  const result = wrappers.map(wrapper => ({
+    tagName: wrapper.tagName,
+    attributes: { ...wrapper.attributes },
+  }));
 
-  return wrappers.map(wrapper => {
-    if (wrapper.attributes?.id !== "content-area") return wrapper;
+  if (!result.length) return result;
 
-    const attributes = { ...wrapper.attributes };
+  const target = result.find(wrapper =>
+    wrapper.attributes.id === "post-area"
+    || wrapper.attributes.id === "postViewArea"
+    || String(wrapper.attributes.class || "").split(/\s+/).includes("post-area")
+  ) || result[result.length - 1];
 
-    attributes.style = setStyleProperty(attributes.style, "width", width);
+  const style = String(target.attributes.style || "").trim();
+  const separator = style && !style.endsWith(";") ? ";" : "";
 
-    return {
-      ...wrapper,
-      attributes,
-    };
-  });
-}
+  target.attributes.style = `${style}${separator}width:${width};max-width:100%;`;
 
-function removeScripts(root) {
-  root.find("script").remove();
-}
-
-function removeEventHandlers(root) {
-  root.find("*").each((_, element) => {
-    const attributes = { ...element.attribs };
-
-    for (const name of Object.keys(attributes)) {
-      if (name.toLowerCase().startsWith("on")) {
-        delete element.attribs[name];
-      }
-    }
-  });
+  return result;
 }
 
 function cleanArchivedRoot(root) {
-  removeScripts(root);
-  removeEventHandlers(root);
+  root.find("script").remove();
+
+  root.find("style").each((_, element) => {
+    const style = root.find(element);
+    const text = style.text();
+
+    /*
+     * 본문 내부에 직접 삽입된 사용자 서식은 유지한다.
+     * 실행용 또는 비어 있는 스타일만 제거한다.
+     */
+    if (!text.trim() || /__se_module_data|display\s*:\s*none/i.test(text)) {
+      style.remove();
+    }
+  });
+
+  root.find("[contenteditable]").removeAttr("contenteditable");
+  root.find("[draggable]").removeAttr("draggable");
 }
 
 function beautifyArchivedHtml(html) {
@@ -483,10 +454,7 @@ function protectPostBody(html) {
 }
 
 function restorePostBody(html, protectedBody) {
-  return String(html).replace(
-    protectedBody.token,
-    () => protectedBody.content,
-  );
+  return String(html).replace(protectedBody.token, () => protectedBody.content);
 }
 
 async function makeHtml(rawHtml, outputDir, options = {}) {
@@ -508,32 +476,23 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
     console.warn("콘텐츠 영역 가로폭을 찾지 못함");
   }
 
-  const viewerCssFilename = await downloadViewerCss(
-    $,
-    outputDir,
-    editorVersion,
-  );
+  const viewerCssFilename = await downloadViewerCss($, outputDir, editorVersion);
 
+  /*
+   * editorVersion은 각 처리기에 전달한다.
+   * 실제 구조 차이가 발견된 기능만 처리기 내부에서 버전별로 분기한다.
+   */
   await localizeImages($, root, imageManager, { editorVersion });
-  await localizeNaverVideos(
-    $,
-    root,
-    outputDir,
-    imageManager,
-    { editorVersion },
-  );
-
+  await localizeNaverVideos($, root, outputDir, imageManager, { editorVersion });
   await localizeAttachments($, root, outputDir, { editorVersion });
 
   restoreYouTubeEmbeds($, root);
   cleanArchivedRoot(root);
 
   /*
-   * 전 에디터 공통:
    * 본문 전체를 placeholder로 보호한다.
-   *
-   * 외부 에디터나 웹에서 붙여 넣은 HTML의 공백, 들여쓰기,
-   * 인라인 스타일을 js-beautify가 변경하지 못하게 한다.
+   * 외부 에디터나 웹에서 붙여 넣은 HTML의 공백, 들여쓰기, 인라인 스타일을
+   * js-beautify가 변경하지 못하게 한다.
    */
   const postBody = $.html(root);
   const body = wrapPostBody(postBody, wrappers);
@@ -543,51 +502,47 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
     ? `<link rel="stylesheet" href="./${viewerCssFilename}">`
     : "";
 
-  const html = `<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Naver Blog Post</title>
-    ${viewerCssLink}
-    <style>
-      html {
-        width: 100%;
-      }
+  const html = `
+    <!doctype html>
+    <html lang="ko">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Naver Blog Post</title>
+        ${viewerCssLink}
+        <style>
+          html {
+            width: 100%;
+          }
 
-      body {
-        width: 100%;
-        margin: 0;
-      }
+          body {
+            width: 100%;
+            margin: 0;
+          }
 
-      #content-area {
-        margin-left: auto;
-        margin-right: auto;
-      }
+          #content-area {
+            margin-left: auto;
+            margin-right: auto;
+          }
 
-      .naver-local-video video {
-        max-width: 100%;
-        height: auto;
-      }
+          .naver-local-video video {
+            max-width: 100%;
+            height: auto;
+          }
 
-      .naver-local-youtube iframe {
-        max-width: 100%;
-      }
-    </style>
-  </head>
-  <body${makeAttributeString(bodyAttributes)}>
-    ${protectedBody.token}
-  </body>
-</html>`;
+          .naver-local-youtube iframe {
+            max-width: 100%;
+          }
+        </style>
+      </head>
+      <body${makeAttributeString(bodyAttributes)}>
+        ${protectedBody.token}
+      </body>
+    </html>
+  `;
 
-  /*
-   * 본문은 placeholder 상태로 두고 문서 외곽만 beautify한다.
-   */
   const beautified = beautifyArchivedHtml(html);
 
-  /*
-   * 본문 복구 이후에는 Cheerio나 js-beautify를 다시 거치지 않는다.
-   */
   return restorePostBody(beautified, protectedBody);
 }
 
