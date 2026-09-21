@@ -6,7 +6,8 @@
   "scripts": {
     "page": "node backup-page.js",
     "category": "node backup-category.js",
-    "blog": "node backup-blog.js"
+    "blog": "node backup-blog.js",
+    "test:gui": "npm run dev --prefix test"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +16,7 @@
   "dependencies": {
     "cheerio": "^1.2.0",
     "js-beautify": "^2.0.3",
+    "playwright": "^1.63.0",
     "turndown": "^7.2.4"
   }
 }

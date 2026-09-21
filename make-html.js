@@ -7,36 +7,123 @@ const { createImageManager, localizeImages } = require("./src/image");
 const { restoreYouTubeEmbeds, localizeNaverVideos } = require("./src/video");
 const { localizeAttachments } = require("./src/attachment");
 
-function getPostRoot($) {
-  const smartEditor = $(".se-main-container").first();
-
-  if (smartEditor.length) {
-    return smartEditor;
+function getPostRoot($, editorVersion) {
+  /*
+   * SmartEditor 1.0:
+   * PostView.css가 #postViewArea > .post-view > .view 구조를 기준으로 적용되므로
+   * .view만 떼지 않고 #postViewArea 전체를 본문 루트로 사용한다.
+   */
+  if (editorVersion === 1) {
+    const postViewArea = $("#postViewArea").first();
+    if (postViewArea.length) return postViewArea;
   }
+
+  /*
+   * SmartEditor 2.0:
+   * 원본 PostView.css가 적용될 수 있도록 #postViewArea 구조를 유지한다.
+   */
+  if (editorVersion === 2) {
+    const postViewArea = $("#postViewArea").first();
+    if (postViewArea.length) return postViewArea;
+
+    const legacy = $(".se3_view").first();
+    if (legacy.length) return legacy;
+  }
+
+  const smartEditor = $(".se-main-container").first();
+  if (smartEditor.length) return smartEditor;
 
   const postView = $("#postViewArea").first();
-
-  if (postView.length) {
-    return postView;
-  }
+  if (postView.length) return postView;
 
   const legacy = $(".se3_view").first();
-
-  if (legacy.length) {
-    return legacy;
-  }
+  if (legacy.length) return legacy;
 
   throw new Error("본문 영역을 찾을 수 없습니다.");
 }
 
-function getViewerCssUrl($) {
-  let result = "";
+function detectEditorVersion($) {
+  const html = $.html();
+  const socialPluginInfo = $("#socialPluginInfoJson").text();
+  const socialMatch = socialPluginInfo.match(/\bsmartEditorVersion["']?\s*:\s*["']?(\d+)["']?/i);
+
+  if (socialMatch) return Number(socialMatch[1]);
+
+  const htmlMatch = html.match(
+    /\bsmartEditorVersion(?:&(?:quot|#034);|["'])?\s*:\s*["']?(\d+)["']?/i,
+  );
+
+  if (htmlMatch) return Number(htmlMatch[1]);
+
+  const baseInfoMatch = html.match(
+    /aPostBaseInfo\s*\[\s*\d+\s*]\s*=\s*["']([^"']+)["']/i,
+  );
+
+  if (baseInfoMatch) {
+    const fields = baseInfoMatch[1].split("|");
+    const version = Number(fields[7]);
+
+    if (Number.isInteger(version) && version > 0) return version;
+  }
+
+  /*
+   * SmartEditor 1.0:
+   * 명시적인 버전 정보가 없을 때 초기 에디터의 본문 구조를 확인한다.
+   */
+  if ($("#postViewArea .post-view > .view").length) return 1;
+
+  if ($(".se-main-container").length) return 3;
+
+  /*
+   * SmartEditor 2.0:
+   * 명시적인 버전 정보 없이 기존 PostView 구조만 확인되는 경우다.
+   */
+  if ($("#postViewArea, .se3_view").length) return 2;
+
+  return 0;
+}
+
+function getViewerCssInfo($, editorVersion) {
+  let result = null;
 
   $("link[rel~='stylesheet'][href]").each((_, element) => {
     const href = $(element).attr("href") || "";
 
-    if (/se\.viewer\.desktop(?:\.min)?\.css/i.test(href)) {
-      result = new URL(href, "https://blog.naver.com/").href;
+    if (
+      (editorVersion === 3 || editorVersion === 4)
+      && /se\.viewer\.desktop(?:\.min)?\.css/i.test(href)
+    ) {
+      result = {
+        url: new URL(href, "https://blog.naver.com/").href,
+        filename: "se.viewer.desktop.css",
+      };
+
+      return false;
+    }
+
+    /*
+     * SmartEditor 1.0:
+     * 원문에 연결된 버전별 PostView CSS를 그대로 사용한다.
+     */
+    if (editorVersion === 1 && /\/PostView-[^/?#]+\.css(?:[?#]|$)/i.test(href)) {
+      result = {
+        url: new URL(href, "https://blog.naver.com/").href,
+        filename: "PostView.css",
+      };
+
+      return false;
+    }
+
+    /*
+     * SmartEditor 2.0:
+     * 원문에 연결된 버전별 PostView CSS를 그대로 사용한다.
+     */
+    if (editorVersion === 2 && /\/PostView-[^/?#]+\.css(?:[?#]|$)/i.test(href)) {
+      result = {
+        url: new URL(href, "https://blog.naver.com/").href,
+        filename: "PostView.css",
+      };
+
       return false;
     }
   });
@@ -53,40 +140,42 @@ function resolveUrl(value, baseUrl) {
 }
 
 function rewriteCssUrls(css, cssUrl) {
-  return String(css).replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (match, quote, value) => {
-    const url = value.trim();
+  return String(css).replace(
+    /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
+    (match, quote, value) => {
+      const url = value.trim();
 
-    if (!url || /^(?:data:|https?:|\/\/|#)/i.test(url)) {
-      return match;
-    }
+      if (!url || /^(?:data:|https?:|\/\/|#)/i.test(url)) return match;
 
-    return `url("${resolveUrl(url, cssUrl)}")`;
-  });
+      return `url("${resolveUrl(url, cssUrl)}")`;
+    },
+  );
 }
 
 function rewriteCssImports(css, cssUrl) {
-  return String(css).replace(/@import\s+(?:url\(\s*)?(['"])(.*?)\1\s*\)?/gi, (match, quote, value) => {
-    const url = value.trim();
+  return String(css).replace(
+    /@import\s+(?:url\(\s*)?(['"])(.*?)\1\s*\)?/gi,
+    (match, quote, value) => {
+      const url = value.trim();
 
-    if (!url || /^(?:data:|https?:|\/\/)/i.test(url)) {
-      return match;
-    }
+      if (!url || /^(?:data:|https?:|\/\/)/i.test(url)) return match;
 
-    return match.replace(value, resolveUrl(value, cssUrl));
-  });
+      return match.replace(value, resolveUrl(value, cssUrl));
+    },
+  );
 }
 
-async function downloadViewerCss($, outputDir) {
-  const cssUrl = getViewerCssUrl($);
+async function downloadViewerCss($, outputDir, editorVersion) {
+  const cssInfo = getViewerCssInfo($, editorVersion);
 
-  if (!cssUrl) {
-    console.warn("SmartEditor Viewer CSS를 찾지 못함");
+  if (!cssInfo) {
+    console.warn(`에디터 v${editorVersion || "?"} CSS를 찾지 못함`);
     return "";
   }
 
-  console.log(`SmartEditor Viewer CSS: ${cssUrl}`);
+  console.log(`에디터 v${editorVersion} CSS: ${cssInfo.url}`);
 
-  const response = await fetch(cssUrl, {
+  const response = await fetch(cssInfo.url, {
     headers: {
       "User-Agent": "Mozilla/5.0",
       Referer: "https://blog.naver.com/",
@@ -95,21 +184,21 @@ async function downloadViewerCss($, outputDir) {
   });
 
   if (!response.ok) {
-    throw new Error(`SmartEditor Viewer CSS 다운로드 실패: ${response.status} ${cssUrl}`);
+    throw new Error(
+      `에디터 v${editorVersion} CSS 다운로드 실패: ${response.status} ${cssInfo.url}`,
+    );
   }
 
   let css = await response.text();
 
-  css = rewriteCssImports(css, cssUrl);
-  css = rewriteCssUrls(css, cssUrl);
+  css = rewriteCssImports(css, cssInfo.url);
+  css = rewriteCssUrls(css, cssInfo.url);
 
-  const filename = "se.viewer.desktop.css";
+  fs.writeFileSync(path.join(outputDir, cssInfo.filename), css, "utf8");
 
-  fs.writeFileSync(path.join(outputDir, filename), css, "utf8");
+  console.log(`에디터 v${editorVersion} CSS 저장: ${cssInfo.filename}`);
 
-  console.log(`SmartEditor Viewer CSS 저장: ${filename}`);
-
-  return filename;
+  return cssInfo.filename;
 }
 
 function getContentAreaWidth($) {
@@ -117,9 +206,7 @@ function getContentAreaWidth($) {
   const inlineStyle = contentArea.attr("style") || "";
   const inlineMatch = inlineStyle.match(/\bwidth\s*:\s*([^;]+)/i);
 
-  if (inlineMatch) {
-    return inlineMatch[1].trim();
-  }
+  if (inlineMatch) return inlineMatch[1].trim();
 
   let result = "";
 
@@ -129,23 +216,16 @@ function getContentAreaWidth($) {
 
     for (const rule of rules) {
       const widthMatch = rule.match(/\bwidth\s*:\s*([^;}]+)/i);
-
-      if (widthMatch) {
-        result = widthMatch[1].trim();
-      }
+      if (widthMatch) result = widthMatch[1].trim();
     }
   });
 
-  if (result) {
-    return result;
-  }
+  if (result) return result;
 
   const bodyClass = $("body").attr("class") || "";
   const bodyWidthMatch = bodyClass.match(/\bcontw-(\d+(?:\.\d+)?)\b/i);
 
-  if (bodyWidthMatch) {
-    return `${bodyWidthMatch[1]}px`;
-  }
+  if (bodyWidthMatch) return `${bodyWidthMatch[1]}px`;
 
   return "";
 }
@@ -154,13 +234,15 @@ function getWrapperPath(root) {
   const wrappers = [];
   let current = root.parent();
 
-  while (current.length && current[0].tagName !== "body" && current[0].tagName !== "html") {
+  while (
+    current.length
+    && current[0].tagName !== "body"
+    && current[0].tagName !== "html"
+  ) {
     const element = current[0];
     const tagName = String(element.tagName || "").toLowerCase();
 
-    if (!tagName) {
-      break;
-    }
+    if (!tagName) break;
 
     wrappers.unshift({
       tagName,
@@ -179,9 +261,7 @@ function sanitizeWrapperAttributes(attributes) {
   for (const [name, value] of Object.entries(attributes || {})) {
     const lowerName = name.toLowerCase();
 
-    if (lowerName.startsWith("on")) {
-      continue;
-    }
+    if (lowerName.startsWith("on")) continue;
 
     if (
       lowerName === "style"
@@ -207,13 +287,11 @@ function escapeAttribute(value) {
 function makeAttributeString(attributes) {
   const entries = Object.entries(attributes || {});
 
-  if (!entries.length) {
-    return "";
-  }
+  if (!entries.length) return "";
 
-  return entries
-    .map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`)
-    .join("");
+  return entries.map(([name, value]) => {
+    return ` ${name}="${escapeAttribute(value)}"`;
+  }).join("");
 }
 
 function wrapPostBody(body, wrappers) {
@@ -234,18 +312,30 @@ function wrapPostBody(body, wrappers) {
 function getBodyAttributes($) {
   const body = $("body").first();
 
-  if (!body.length) {
-    return {};
-  }
+  if (!body.length) return {};
 
   return sanitizeWrapperAttributes(body[0].attribs);
 }
 
-function removeUnsafeWrapperIds(wrappers) {
+function removeUnsafeWrapperIds(wrappers, editorVersion) {
+  const allowedIds = new Set(["content-area"]);
+
+  /*
+   * SmartEditor 1.0:
+   * PostView.css의 #post-area 선택자가 작동하도록 ID를 보존한다.
+   */
+  if (editorVersion === 1) allowedIds.add("post-area");
+
+  /*
+   * SmartEditor 2.0:
+   * PostView.css의 #post-area 선택자가 작동하도록 ID를 보존한다.
+   */
+  if (editorVersion === 2) allowedIds.add("post-area");
+
   return wrappers.map(wrapper => {
     const attributes = { ...wrapper.attributes };
 
-    if (attributes.id && attributes.id !== "content-area") {
+    if (attributes.id && !allowedIds.has(attributes.id)) {
       delete attributes.id;
     }
 
@@ -256,11 +346,42 @@ function removeUnsafeWrapperIds(wrappers) {
   });
 }
 
-function trimWrapperPath(wrappers) {
-  const contentAreaIndex = wrappers.findIndex(wrapper => wrapper.attributes?.id === "content-area");
+function trimWrapperPath(wrappers, editorVersion) {
+  const contentAreaIndex = wrappers.findIndex(wrapper => {
+    return wrapper.attributes?.id === "content-area";
+  });
+
+  const postAreaIndex = wrappers.findIndex(wrapper => {
+    return wrapper.attributes?.id === "post-area";
+  });
+
+  /*
+   * SmartEditor 1.0:
+   * PostView.css에는 #post-area 등 조상 요소를 포함한 선택자가 있으므로
+   * #content-area부터 #postViewArea 직전까지 실제 래퍼 경로를 유지한다.
+   */
+  if (editorVersion === 1) {
+    if (contentAreaIndex >= 0) return wrappers.slice(contentAreaIndex);
+    if (postAreaIndex >= 0) return wrappers.slice(postAreaIndex);
+
+    return wrappers;
+  }
+
+  /*
+   * SmartEditor 2.0:
+   * PostView.css가 #post-area 등 기존 블로그 래퍼를 기준으로 적용되므로
+   * #content-area부터 #postViewArea 직전까지 실제 래퍼 경로를 유지한다.
+   */
+  if (editorVersion === 2) {
+    if (contentAreaIndex >= 0) return wrappers.slice(contentAreaIndex);
+    if (postAreaIndex >= 0) return wrappers.slice(postAreaIndex);
+
+    return wrappers;
+  }
 
   const viewerIndex = wrappers.findIndex(wrapper => {
     const className = wrapper.attributes?.class || "";
+
     return /\bse-viewer\b/i.test(className);
   });
 
@@ -271,22 +392,17 @@ function trimWrapperPath(wrappers) {
     ];
   }
 
-  if (viewerIndex >= 0) {
-    return wrappers.slice(viewerIndex);
-  }
-
-  if (contentAreaIndex >= 0) {
-    return [wrappers[contentAreaIndex]];
-  }
+  if (viewerIndex >= 0) return wrappers.slice(viewerIndex);
+  if (contentAreaIndex >= 0) return [wrappers[contentAreaIndex]];
 
   return [];
 }
 
-function prepareWrapperPath(root) {
+function prepareWrapperPath(root, editorVersion) {
   const wrappers = getWrapperPath(root);
-  const trimmed = trimWrapperPath(wrappers);
+  const trimmed = trimWrapperPath(wrappers, editorVersion);
 
-  return removeUnsafeWrapperIds(trimmed);
+  return removeUnsafeWrapperIds(trimmed, editorVersion);
 }
 
 function setStyleProperty(style, property, value) {
@@ -298,9 +414,7 @@ function setStyleProperty(style, property, value) {
   const filtered = declarations.filter(declaration => {
     const index = declaration.indexOf(":");
 
-    if (index < 0) {
-      return true;
-    }
+    if (index < 0) return true;
 
     const name = declaration.slice(0, index).trim();
 
@@ -313,14 +427,10 @@ function setStyleProperty(style, property, value) {
 }
 
 function applyContentAreaWidth(wrappers, width) {
-  if (!width) {
-    return wrappers;
-  }
+  if (!width) return wrappers;
 
   return wrappers.map(wrapper => {
-    if (wrapper.attributes?.id !== "content-area") {
-      return wrapper;
-    }
+    if (wrapper.attributes?.id !== "content-area") return wrapper;
 
     const attributes = { ...wrapper.attributes };
 
@@ -354,53 +464,6 @@ function cleanArchivedRoot(root) {
   removeEventHandlers(root);
 }
 
-/*
- * 중요:
- *
- * 코드 내용을 HTML 문자열로 직렬화하기 전에 빼놓는다.
- *
- * 이렇게 해야:
- *
- *   Cheerio $.html()
- *   js-beautify
- *
- * 어느 쪽도 실제 코드의 공백/줄바꿈/들여쓰기를
- * 건드릴 수 없다.
- */
-function protectCodeContentsInDom($, root) {
-  const codes = [];
-
-  root.find(".__se_code_view").each((_, element) => {
-    const code = $(element);
-    const content = code.html() || "";
-
-    const token = `NAVERCODEPLACEHOLDER${String(codes.length).padStart(8, "0")}END`;
-
-    codes.push({
-      token,
-      content,
-    });
-
-    code.html(token);
-  });
-
-  return codes;
-}
-
-/*
- * 모든 HTML 직렬화 + beautify가 끝난 다음
- * 코드 원문을 그대로 복구한다.
- */
-function restoreCodeContents(html, codes) {
-  let result = html;
-
-  for (const { token, content } of codes) {
-    result = result.replace(token, () => content);
-  }
-
-  return result;
-}
-
 function beautifyArchivedHtml(html) {
   return beautifyHtml(html, {
     indent_size: 2,
@@ -412,14 +475,31 @@ function beautifyArchivedHtml(html) {
   });
 }
 
-async function makeHtml(rawHtml, outputDir) {
+function protectPostBody(html) {
+  return {
+    token: "NAVERPOSTBODYPLACEHOLDER00000000END",
+    content: String(html),
+  };
+}
+
+function restorePostBody(html, protectedBody) {
+  return String(html).replace(
+    protectedBody.token,
+    () => protectedBody.content,
+  );
+}
+
+async function makeHtml(rawHtml, outputDir, options = {}) {
   const $ = cheerio.load(rawHtml, { decodeEntities: false });
-  const root = getPostRoot($);
+  const editorVersion = options.editorVersion ?? detectEditorVersion($);
+  const root = getPostRoot($, editorVersion);
   const contentAreaWidth = getContentAreaWidth($);
   const bodyAttributes = getBodyAttributes($);
   const imageManager = createImageManager(outputDir);
 
-  let wrappers = prepareWrapperPath(root);
+  console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
+
+  let wrappers = prepareWrapperPath(root, editorVersion);
 
   if (contentAreaWidth) {
     console.log(`콘텐츠 영역 가로폭: ${contentAreaWidth}`);
@@ -428,33 +508,36 @@ async function makeHtml(rawHtml, outputDir) {
     console.warn("콘텐츠 영역 가로폭을 찾지 못함");
   }
 
-  const viewerCssFilename = await downloadViewerCss($, outputDir);
+  const viewerCssFilename = await downloadViewerCss(
+    $,
+    outputDir,
+    editorVersion,
+  );
 
-  /*
-   * 이 단계에서는 아직 실제 코드 내용이 DOM 안에 있다.
-   */
-  await localizeImages($, root, imageManager);
-  await localizeNaverVideos($, root, outputDir, imageManager);
-  await localizeAttachments($, root, outputDir);
+  await localizeImages($, root, imageManager, { editorVersion });
+  await localizeNaverVideos(
+    $,
+    root,
+    outputDir,
+    imageManager,
+    { editorVersion },
+  );
+
+  await localizeAttachments($, root, outputDir, { editorVersion });
 
   restoreYouTubeEmbeds($, root);
-
   cleanArchivedRoot(root);
 
   /*
-   * 반드시 $.html(root)보다 먼저 실행한다.
+   * 전 에디터 공통:
+   * 본문 전체를 placeholder로 보호한다.
    *
-   * 코드 내용을 placeholder로 바꾼 뒤부터는
-   * Cheerio/beautifier가 코드 본문을 건드릴 수 없다.
-   */
-  const protectedCodes = protectCodeContentsInDom($, root);
-
-  /*
-   * 여기서부터 DOM → HTML 문자열 변환.
-   * 실제 코드 대신 placeholder만 들어 있다.
+   * 외부 에디터나 웹에서 붙여 넣은 HTML의 공백, 들여쓰기,
+   * 인라인 스타일을 js-beautify가 변경하지 못하게 한다.
    */
   const postBody = $.html(root);
   const body = wrapPostBody(postBody, wrappers);
+  const protectedBody = protectPostBody(body);
 
   const viewerCssLink = viewerCssFilename
     ? `<link rel="stylesheet" href="./${viewerCssFilename}">`
@@ -493,28 +576,23 @@ async function makeHtml(rawHtml, outputDir) {
     </style>
   </head>
   <body${makeAttributeString(bodyAttributes)}>
-    ${body}
+    ${protectedBody.token}
   </body>
 </html>`;
 
   /*
-   * HTML 전체 beautify.
-   *
-   * 이 시점에도 실제 코드 내용은 없으므로
-   * 코드 들여쓰기가 추가될 수 없다.
+   * 본문은 placeholder 상태로 두고 문서 외곽만 beautify한다.
    */
   const beautified = beautifyArchivedHtml(html);
 
   /*
-   * 가장 마지막에 코드 원문 복구.
-   *
-   * 복구 이후에는 Cheerio나 js-beautify를
-   * 절대 다시 거치지 않는다.
+   * 본문 복구 이후에는 Cheerio나 js-beautify를 다시 거치지 않는다.
    */
-  return restoreCodeContents(beautified, protectedCodes);
+  return restorePostBody(beautified, protectedBody);
 }
 
 module.exports = {
   makeHtml,
   getPostRoot,
+  detectEditorVersion,
 };

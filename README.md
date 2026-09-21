@@ -1,12 +1,79 @@
 # Naver Blog to Markdown
 
-네이버 블로그 게시글을 ****Markdown + 로컬 미디어 파일로 백업하는 Node.js 도구****입니다.
+네이버 블로그 게시글을 **Markdown + Original HTML + 로컬 미디어 파일**로 백업하는 Node.js 도구입니다.
 
-단일 게시글뿐 아니라 ****카테고리 단위 백업과 블로그 전체 백업****을 지원합니다.
+단일 게시글뿐 아니라 **카테고리 단위 백업과 블로그 전체 백업**을 지원합니다.
 
-단순히 본문 텍스트만 Markdown으로 바꾸는 것이 아니라, ****SmartEditor ONE의 문서 구조와 서식을 가능한 한 유지하는 것****을 목표로 합니다.
+본인 네이버 계정으로 로그인하면 **나만 볼 수 있는 비공개 게시글**도 백업할 수 있습니다.
 
-텍스트 스타일, 이미지, 첨부파일, 표, 인용구, 구분선, 소스코드, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석하여 Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소는 HTML/CSS를 사용해 보존합니다.
+네이버 블로그에서 사용된 다음 에디터를 지원합니다.
+
+| 에디터 버전 | 본문 구조 | 저장되는 Viewer CSS |
+| --- | --- | --- |
+| SmartEditor 1.x | `#postViewArea`, `.post-view`, `.view` | `PostView.css` |
+| SmartEditor 2.x | `#postViewArea`, `.post-view`, `.se3_view` | `PostView.css` |
+| SmartEditor 3.x 이상 | `.se-viewer`, `.se-main-container` | `se.viewer.desktop.css` |
+
+에디터 버전을 게시글 HTML에서 자동으로 판별하고, 각 버전의 본문 구조와 Viewer CSS를 가능한 한 유지합니다.
+
+단순히 본문 텍스트만 Markdown으로 바꾸는 것이 아니라 텍스트 스타일, 이미지, 첨부파일, 표, 인용구, 구분선, 소스코드, 링크, YouTube 영상, 네이버 동영상, OG 링크 카드 등을 분석합니다.
+
+Markdown으로 표현할 수 있는 요소는 Markdown으로 변환하고, Markdown만으로 표현하기 어려운 요소와 외부 에디터에서 붙여 넣은 복잡한 HTML 서식은 HTML/CSS로 보존합니다.
+
+---
+
+## Installation
+
+### 요구 사항
+
+- Node.js 20 이상 권장
+- npm
+- 비공개 게시글 백업 시 Playwright Chromium
+- Windows, macOS 또는 Linux
+
+Node.js가 설치되어 있는지 확인합니다.
+
+```bash
+node --version
+npm --version
+```
+
+### 프로젝트 설치
+
+저장소를 내려받은 후 프로젝트 폴더로 이동합니다.
+
+```bash
+git clone REPOSITORY_URL
+cd naver-blog-to-markdown
+```
+
+의존성을 설치합니다.
+
+```bash
+npm install
+```
+
+비공개 게시글도 백업하려면 Playwright Chromium을 설치합니다.
+
+```bash
+npx playwright install chromium
+```
+
+공개 게시글만 백업하는 경우에는 Chromium을 사용할 일이 없지만, 나중에 `--private` 옵션을 사용할 예정이라면 미리 설치해도 됩니다.
+
+### npm 명령 확인
+
+`package.json`에 다음 명령이 등록되어 있어야 합니다.
+
+```json
+{
+  "scripts": {
+    "page": "node backup-page.js",
+    "category": "node backup-category.js",
+    "blog": "node backup-blog.js"
+  }
+}
+```
 
 ---
 
@@ -19,6 +86,7 @@
 #### 단일 게시글
 
 특정 게시글 하나를 백업합니다.
+
 ```bash
 npm run page -- "https://blog.naver.com/BLOG_ID/LOG_NO"
 ```
@@ -28,518 +96,272 @@ npm run page -- "https://blog.naver.com/BLOG_ID/LOG_NO"
 #### 카테고리 전체
 
 특정 카테고리의 게시글을 백업합니다.
+
 ```bash
 npm run category -- "https://blog.naver.com/BLOG_ID" "카테고리명"
 ```
 
 상위 카테고리를 선택한 경우 해당 카테고리에 포함된 하위 카테고리의 게시글도 함께 백업됩니다.
 
+카테고리 계층은 출력 폴더에도 그대로 반영됩니다.
+
+```text
+output/
+└── 상위 카테고리/
+    └── 하위 카테고리/
+        └── LOG_NO_게시글 제목/
+```
+
 #### 블로그 전체
 
 블로그의 전체 게시글을 백업합니다.
+
 ```bash
 npm run blog -- "https://blog.naver.com/BLOG_ID"
 ```
 
 ---
 
-### 🔄 Incremental Backup
+### 🧩 Editor Compatibility
 
-카테고리 및 전체 블로그 백업에서는 이미 백업한 게시글을 매번 다시 변환하지 않습니다.
+게시글별 에디터 버전을 자동으로 확인하여 각 에디터에 맞는 본문 추출 및 CSS 처리를 적용합니다.
 
-게시글 본문의 hash를 `output/backup-cache.json`에 기록하고, 다음 백업에서 이전 hash와 비교합니다.
+| 에디터 | 본문 구조 | 저장되는 Viewer CSS |
+| --- | --- | --- |
+| SmartEditor 1.0 | `#postViewArea`, `.post-view`, `.view` | `PostView.css` |
+| SmartEditor 2.0 | `#postViewArea`, `.post-view`, `.se3_view` | `PostView.css` |
+| SmartEditor ONE | `.se-viewer`, `.se-main-container` | `se.viewer.desktop.css` |
 
-예:
-```text
-[1/1134] 게시글 제목
-가져오는 중: BLOG_ID/LOG_NO
-변경 없음: 건너뜀
+SmartEditor 1.0과 2.0에서는 `PostView.css`가 적용되도록 `#post-area`, `#postViewArea`, `.post-view` 등의 원본 래퍼 구조를 보존합니다.
+
+SmartEditor ONE에서는 `.se-viewer`, `.se-main-container`, `.se-component`, `.se-module` 등의 문서 구조를 보존합니다.
+
+에디터 버전에 따라 서로 다른 이미지 저장 형식도 처리합니다.
+
+- `src`
+- `data-src`
+- `data-lazy-src`
+- `data-original`
+- `data-origin-src`
+- `srcset`
+- `blogfiles.pstatic.net`
+- `postfiles.pstatic.net`
+- `dthumb-phinf.pstatic.net` 프록시 이미지
+- 외부 이미지 URL
+
+다운로드 가능한 주소 후보를 순서대로 확인하고, 실제 이미지 응답이 확인된 주소를 사용합니다.
+
+외부 웹이나 다른 에디터에서 붙여 넣은 복잡한 HTML 블록도 가능한 한 원본 HTML로 보존합니다.
+
+---
+
+### 🔐 Private Posts
+
+본인 네이버 계정으로 로그인하면 **나만 볼 수 있는 비공개 게시글**도 백업할 수 있습니다.
+
+프로그램에 네이버 아이디나 비밀번호를 입력할 필요는 없습니다. Playwright가 실행한 Chromium 브라우저에서 사용자가 직접 로그인합니다.
+
+각 명령에 `--private` 옵션을 추가합니다.
+
+#### 단일 비공개 게시글
+
+```bash
+npm run page -- "https://blog.naver.com/BLOG_ID/LOG_NO" --private
 ```
 
-백업 결과에서는 다음과 같이 상태를 확인할 수 있습니다.
-```text
-카테고리 백업 완료
-전체: 1134
-신규: 0
-업데이트: 0
-변경 없음: 1134
-실패: 0
+#### 비공개 글을 포함한 카테고리 백업
+
+```bash
+npm run category -- "https://blog.naver.com/BLOG_ID" "카테고리명" --private
 ```
 
-`backup-cache.json`은 게시글별로 별도 생성되는 것이 아니라 전체 백업 상태를 하나의 파일에 누적해서 관리합니다.
-```text
-output/
-├── backup-cache.json
-├── 카테고리1/
-├── 카테고리2/
-└── ...
+#### 비공개 글을 포함한 전체 블로그 백업
+
+```bash
+npm run blog -- "https://blog.naver.com/BLOG_ID" --private
 ```
+
+#### 최초 로그인
+
+`--private`을 처음 사용하거나 저장된 인증이 만료된 경우 Chromium 브라우저가 실행됩니다.
+
+```text
+네이버 로그인이 필요합니다.
+브라우저에서 로그인해주세요.
+로그인이 완료될 때까지 기다리는 중...
+네이버 인증 정보 저장 완료
+```
+
+실행된 브라우저에서 본인 네이버 계정으로 로그인합니다.
+
+로그인이 확인되면 필요한 쿠키와 인증 정보가 `.auth/` 폴더에 저장되고 로그인용 브라우저는 자동으로 종료됩니다.
+
+이후 실제 게시글 백업은 브라우저 자동 조작이 아니라 저장된 인증 정보를 포함한 HTTP 요청으로 처리됩니다.
+
+#### 저장된 인증 재사용
+
+저장된 인증이 유효하면 다음 실행부터 로그인 브라우저가 나타나지 않습니다.
+
+```text
+저장된 네이버 인증 정보를 확인합니다.
+저장된 네이버 인증 정보를 사용합니다.
+```
+
+인증이 만료되면 브라우저가 다시 실행되며, 로그인 후 새로운 인증 정보가 저장됩니다.
+
+#### 다른 계정으로 다시 로그인
+
+저장된 인증을 초기화하려면 `.auth/` 폴더를 삭제합니다.
+
+Git Bash, macOS 또는 Linux:
+
+```bash
+rm -rf .auth
+```
+
+Windows PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force .auth
+```
+
+그다음 `--private` 명령을 다시 실행하면 로그인 브라우저가 나타납니다.
+
+#### 인증 정보 주의사항
+
+`.auth/`에는 로그인 상태를 유지하는 인증 정보가 들어 있으므로 외부에 공유하면 안 됩니다.
+
+`.gitignore`에 다음 항목을 추가해야 합니다.
+
+```gitignore
+.auth/
+```
+
+네이버 아이디와 비밀번호 자체는 프로그램에 입력하거나 별도 파일로 저장하지 않습니다.
 
 ---
 
 ### 🌐 Original HTML
 
 각 게시글은 Markdown 변환 전에 `original.html`로 먼저 보존됩니다.
-게시글에서 사용하는 SmartEditor Viewer CSS도 `se.viewer.desktop.css`로 함께 저장합니다.
+
+게시글에서 사용하는 Viewer CSS도 에디터 버전에 따라 함께 저장합니다.
+
 ```text
-글번호_게시글 제목/
+LOG_NO_게시글 제목/
 ├── original.html
 ├── index.md
+├── PostView.css
 ├── se.viewer.desktop.css
 ├── photo.jpg
 ├── video.mp4
 └── download/
 ```
 
-`original.html`과 `index.md`는 같은 로컬 미디어 파일을 공유합니다. Markdown 생성 단계에서는 이미지, 동영상, 첨부파일을 다시 다운로드하지 않습니다.
+실제로는 해당 게시글의 에디터에서 사용하는 CSS 파일만 생성됩니다.
+
+- SmartEditor 1.0·2.0: `PostView.css`
+- SmartEditor ONE: `se.viewer.desktop.css`
+
+`original.html`과 `index.md`는 같은 로컬 미디어 파일을 공유합니다.
+
+Markdown 생성 단계에서는 이미지, 동영상, 첨부파일을 다시 다운로드하지 않습니다.
+
+`original.html`에서는 본문 전체를 HTML 정리 과정으로부터 보호하여 다음 내용을 가능한 한 유지합니다.
+
+- 원본 본문 구조
+- 인라인 스타일
+- 코드 들여쓰기
+- `white-space: pre`
+- 외부 에디터에서 붙여 넣은 HTML
+- 표 및 중첩 요소
+- 글자별 색상과 배경색
 
 ---
 
-### 📝 Text & Formatting
+### 📝 Markdown Conversion
 
-SmartEditor ONE의 텍스트와 주요 인라인 서식을 보존합니다.
+Markdown으로 안정적으로 표현할 수 있는 요소는 Markdown 문법으로 변환합니다.
 
-* 제목 및 본문
-* 굵게
-* 기울임
-* 취소선
-* 밑줄
-* 글자색
-* 글자 배경색
-* 글자 크기
-* 링크
-* 체크박스
-* 원문의 빈 줄
-* 혼합 서식
+- 제목
+- 본문
+- 굵게
+- 기울임
+- 취소선
+- 링크
+- 체크박스
+- 이미지
+- 목록
+- 인용문
+- 소스코드
 
-Markdown으로 표현 가능한 서식은 가능한 한 Markdown 문법을 사용합니다.
-```markdown
-****굵게****
-**기울임**
-~~취소선~~
-[링크](https://example.com)
-- [ ] 체크박스
-```
+Markdown만으로 원본 구조를 표현하기 어려운 요소는 HTML로 보존합니다.
 
-밑줄, 색상, 특수 글자 크기처럼 Markdown으로 표현할 수 없는 서식은 HTML을 사용합니다.
+- 밑줄
+- 글자색
+- 글자 배경색
+- 특수 글자 크기
+- 병합된 표
+- 복잡한 링크 카드
+- 외부 에디터에서 붙여 넣은 코드블록
+- 복잡한 인라인 HTML 서식
+
+예:
+
 ```html
 <u>밑줄</u>
 <span style="color:#ff0000">빨간 글자</span>
 <span style="font-size:11px">11px 글자</span>
 ```
 
----
+HTML 블록과 다음 Markdown 요소가 붙어서 렌더링되지 않는 문제를 막기 위해 `<br>` 묶음 바로 아래에는 빈 줄을 추가합니다.
 
-### 🔠 Font Size & Headings
+```markdown
+<br>
+<br>
 
-네이버의 글자 크기를 분석하여 Markdown 제목 문법 또는 HTML로 변환합니다.
+![](./image.png)
+```
 
-| Naver | Markdown      |
-| ----: | :------------ |
-|  11px | HTML `<span>` |
-|  13px | 일반 본문         |
-|  15px | `######`      |
-|  16px | `#####`       |
-|  19px | `####`        |
-|  24px | `###`         |
-|  28px | `##`          |
-|  30px | `#`           |
-|  34px | HTML `<span>` |
-|  38px | HTML `<span>` |
-
-한 문단 안에 여러 글자 크기가 섞여 있는 경우에는 Markdown heading으로 강제 변환하지 않고 각각의 크기를 HTML로 보존합니다.
+이렇게 하면 `<br>` 다음에 나오는 이미지, 목록, 표, 인용문, 소스코드 등이 정상적으로 렌더링됩니다.
 
 ---
 
 ### 🖼️ Images
 
-게시글 이미지를 원격 URL에 의존하지 않고 ****로컬 파일로 다운로드****합니다.
+게시글 이미지를 원격 URL에 의존하지 않고 **로컬 파일로 다운로드**합니다.
 
 ```text
 output/
 └── 카테고리/
-    └── 글번호_게시글 제목/
-        ├── index.md
-        ├── photo.jpg
-        ├── image.png
-        └── ...
+    └── LOG_NO_게시글 제목/
+        ├── index.md
+        ├── image.png
+        ├── image_2.png
+        └── ...
 ```
 
-Markdown/HTML에서는 로컬 파일을 참조합니다.
+Markdown과 HTML에서는 같은 로컬 파일을 참조합니다.
+
 ```markdown
-![](./photo.jpg)
+![](./image.png)
 ```
 
-표시 크기가 필요한 경우:
+표시 크기나 인라인 스타일을 보존해야 하는 경우에는 HTML을 사용합니다.
+
 ```html
-<img src="./photo.jpg" style="width:640px;max-width:100%;height:auto;">
-```
-
----
-
-### 📎 Attachments
-
-게시글에 첨부된 파일을 ****로컬 파일로 다운로드****합니다.
-
-첨부파일은 이미지나 동영상과 파일명이 충돌하지 않도록 게시글 폴더 내부의 `download/` 폴더에 별도로 저장합니다.
-```text
-글번호_게시글 제목/
-├── index.md
-├── photo.jpg
-├── video.mp4
-└── download/
-    ├── 자료.zip
-    ├── 문서.pdf
-    └── 데이터.xlsx
+<img src="./image.png" style="width:640px;max-width:100%;height:auto;">
 ```
 
 ---
 
 ### 💻 Source Code
 
-SmartEditor ONE의 ****소스코드 컴포넌트****를 fenced code block으로 변환합니다.
+SmartEditor ONE의 소스코드 컴포넌트는 fenced code block으로 변환합니다.
 
-예:
 ````markdown
 ```{se-l-default}
 const message = "Hello World";
+
 console.log(message);
 ```
-````
-
----
-
-### 🎬 YouTube
-
-SmartEditor ONE에 삽입된 YouTube 영상을 보존합니다.
-
-* 일반 YouTube 영상
-
-* YouTube Shorts
-
-* 시작 시간
-
-* 원본 영상 ID
-
-* iframe 임베드
-
-예:
-```html
-<iframe src="https://www.youtube.com/embed/VIDEO_ID?start=65" ...></iframe>
-```
-
-게시글 내부의 SmartEditor 모듈 데이터를 분석하여 영상을 식별합니다.
-
----
-
-### 🎥 Naver Video
-
-네이버 블로그에 직접 삽입된 ****네이버 동영상도 로컬로 백업****합니다.
-```text
-video-001.mp4
-video-thumb-001.jpg
-```
-
-Markdown에는 HTML5 `<video>`로 삽입합니다.
-```html
-<video controls style="width:100%;height:auto;" poster="./video-thumb-001.jpg">
-  <source src="./video-001.mp4" type="video/mp4">
-</video>
-```
-
----
-
-### 🔗 OG Link Cards
-
-네이버의 링크 미리보기 카드
-
-* 제목
-* 설명
-* 도메인
-* 원본 링크
-* 썸네일
-
----
-
-### 📊 Tables
-
-SmartEditor ONE 표를 분석하여 ****단순 표와 복잡한 표를 구분****합니다.
-
-**단순 표**는 Markdown table로 변환합니다.
-
-| 이름 | 값 |
-| --- | --- |
-| A | 100 |
-| B | 200 |
-
-**복잡한 표**는 원본의 병합 구조와 텍스트 서식을 유지하면서 HTML `<table>`형태로 변환합니다.
-
----
-
-### 💬 Quote Cards
-
-인용문과 출처(cite)를 별도로 보존하며, 원래 네이버 인용구 타입도 기록합니다.
-```html
-<div class="naver-quote" data-naver-quote-type="quotation_line"></div>
-```
-
----
-
-### ➖ Horizontal Lines
-
-네이버 구분선은 일반 Markdown의 `---`로 단순 변환하지 않고 HTML/CSS 형태로 보존합니다.
-```html
-<div class="naver-hr naver-hr-line3 naver-hr-left" data-naver-line-type="line3" data-naver-align="left"></div>
-```
-
----
-
-## Conversion Strategy
-
-게시글은 다음 순서로 처리합니다.
-
-```text
-Naver raw HTML
-      ↓
-debug-raw.html
-      ↓
-make-html.js
-      ├─ 게시글 본문 추출
-      ├─ 이미지 로컬화
-      ├─ 네이버 동영상 로컬화
-      ├─ 첨부파일 로컬화
-      ├─ YouTube iframe 복원
-      ├─ SmartEditor 구조 및 CSS 보존
-      └─ HTML beautify
-      ↓
-original.html
-      ↓
-make-markdown.js
-      ↓
-index.md
-```
-
-`debug-raw.html`은 가장 최근에 가져온 네이버 원본 HTML을 확인하기 위한 디버그 파일이며 프로젝트 루트에 저장됩니다.
-
-`original.html`을 보관용 기준 원본으로 두고, Markdown 변환은 이미 로컬화된 HTML을 기반으로 수행합니다.
-
-따라서 `original.html`과 `index.md`가 같은 이미지, 네이버 동영상, 첨부파일을 공유하며 Markdown 생성 단계에서 같은 미디어를 다시 다운로드하지 않습니다.
-
-Markdown 변환 자체는 **Markdown-first** 방식입니다.
-
-Markdown으로 표현할 수 있는 것은 Markdown을 사용합니다.
-
-```markdown
-**bold**
-*italic*
-~~strike~~
-[link](URL)
-# heading
-- [ ] task
-```
-
-소스코드 역시 Markdown fenced code block을 사용합니다.
-
-````markdown
-```{se-l-default}
-const value = 100;
-```
-````
-
-Markdown으로 정확하게 표현할 수 없는 경우에만 HTML을 사용합니다.
-
-```html
-<u>underline</u>
-<span style="color:...">...</span>
-<table>...</table>
-<iframe ...></iframe>
-<video ...></video>
-```
-
-따라서 모든 내용을 HTML로 감싸는 방식보다 Markdown 자체의 가독성과 편집 가능성을 유지하면서 네이버 고유 요소도 함께 보존할 수 있습니다.
-
----
-
-## Installation
-
-### Requirements
-
-* Node.js
-
-* npm
-
-저장소를 클론합니다.
-```bash
-git clone https://github.com/sansoohan/naver-blog-to-markdown.git
-
-cd naver-blog-to-markdown
-```
-
-의존성을 설치합니다.
-```bash
-npm install
-```
-
----
-
-## Usage
-
-### 단일 게시글 백업
-```bash
-npm run page -- "https://blog.naver.com/BLOG_ID/LOG_NO"
-```
-
-### 카테고리 백업
-
-카테고리명을 직접 지정할 수 있습니다.
-```bash
-npm run category -- "https://blog.naver.com/BLOG_ID" "카테고리명"
-```
-
-### 블로그 전체 백업
-```bash
-npm run blog -- "https://blog.naver.com/BLOG_ID"
-```
-
----
-
-## Output
-
-변환 결과는 `output` 폴더 아래에 저장됩니다.
-```text
-output/
-├── backup-cache.json
-├── 카테고리1/
-│   ├── LOG_NO_게시글 제목/
-│   │   ├── original.html
-│   │   ├── index.md
-│   │   ├── se.viewer.desktop.css
-│   │   ├── photo.jpg
-│   │   ├── video.mp4
-│   │   └── download/
-│   │       └── 자료.zip
-│   └── ...
-├── 카테고리2/
-│   └── ...
-└── .tmp/
-```
-
-`backup-cache.json` 에는 게시글별 hash와 백업 정보가 저장됩니다.
-
-```json
-{
-  "BLOG_ID/LOG_NO": {
-    "hash": "...",
-    "modifiedAt": null,
-    "title": "게시글 제목",
-    "category": "카테고리",
-    "path": "output/카테고리/LOG_NO_게시글 제목",
-    "backedUpAt": "..."
-  }
-}
-```
-
----
-
-## Project Structure
-
-주요 변환 로직은 기능별로 분리되어 있습니다.
-```text
-naver-blog-to-markdown/
-├── backup-page.js
-├── backup-category.js
-├── backup-blog.js
-├── src/
-│   ├── attachment.js
-│   ├── paragraph.js
-│   ├── image.js
-│   ├── table.js
-│   ├── quote.js
-│   ├── horizontal-line.js
-│   ├── video.js
-│   └── code.js
-└── output/
-    └── backup-cache.json
-```
-
-| File                 | Role                                 |
-| -------------------- | ------------------------------------ |
-| `backup-page.js`     | 단일 게시글 가져오기, 변환 흐름, hash 및 캐시 관리     |
-| `backup-category.js` | 카테고리 탐색 및 카테고리 단위 백업                 |
-| `backup-blog.js`     | 블로그 전체 게시글 백업                        |
-| `make-html.js` | 게시글 본문 추출, 리소스 로컬화 및 `original.html` 생성 |
-| `make-markdown.js` | `original.html`을 기반으로 `index.md` 생성 |
-| `attachment.js`      | 첨부파일 탐지, 다운로드 및 로컬 링크 변환             |
-| `paragraph.js`       | 텍스트, 글자 크기, 인라인 서식, 링크, 체크박스         |
-| `image.js`           | 이미지 다운로드, 중복 방지, 고해상도 이미지 및 표시 크기 처리 |
-| `table.js`           | Markdown/HTML 표 변환                   |
-| `quote.js`           | 네이버 인용구 카드                           |
-| `horizontal-line.js` | 네이버 구분선 타입 및 정렬 보존                   |
-| `video.js`           | YouTube 및 네이버 동영상                    |
-| `code.js`            | 네이버 소스코드 컴포넌트 및 디자인 클래스 변환           |
-
----
-
-## Design Goals
-
-### 1. 원본 구조 보존
-
-SmartEditor ONE의 실제 DOM과 모듈 정보를 분석하여 원본 게시글의 의미와 구조를 최대한 유지합니다.
-
-### 2. Markdown 우선
-
-Markdown으로 표현할 수 있는 요소를 불필요하게 HTML로 변환하지 않습니다.
-
-### 3. 로컬 백업
-
-이미지, 동영상, 첨부파일 등 중요한 파일을 가능한 한 로컬에 저장하여 네이버의 원격 리소스에 대한 의존성을 줄입니다.
-
-`original.html`과 `index.md`는 같은 로컬 미디어 파일을 공유하여 동일한 파일을 HTML용과 Markdown용으로 중복 다운로드하지 않습니다.
-
-### 4. 증분 백업
-
-이미 백업한 게시글은 본문 hash를 비교하여 변경된 경우에만 다시 백업합니다.
-
-대량의 카테고리나 블로그 전체를 반복해서 백업할 때 불필요한 변환 및 미디어 다운로드를 줄이는 것을 목표로 합니다.
-
-### 5. 안전한 업데이트
-
-새로운 백업을 임시 폴더에 먼저 완성한 뒤 기존 백업과 교체하여 작업 중 오류로 기존 백업이 손상될 가능성을 줄입니다.
-
-### 6. 중복 파일 최소화
-
-동일한 URL의 이미지, 썸네일, 동영상, 첨부파일이 반복해서 사용되는 경우에는 기존에 다운로드한 파일을 재사용합니다.
-
-### 7. 원본 정보 보존
-
-Markdown에서 직접 표현할 수 없는 네이버 고유 컴포넌트는 `data-naver-*` 메타데이터 등을 사용하여 원래 타입을 식별할 수 있도록 합니다.
-
-소스코드처럼 Markdown으로 표현할 수 있지만 네이버 고유 디자인 정보가 존재하는 경우에는 fence info string 등에 원래 클래스 정보를 보존합니다.
-
-향후 Markdown → Naver 형태의 ****역방향 변환 가능성****도 고려한 구조입니다.
-
----
-
-## Limitations
-
-### Markdown 뷰어마다 다르게 렌더링될 수 있습니다
-
-생성되는 index.md는 일반 Markdown 문법뿐 아니라 원본 네이버 블로그의 구조와 디자인을 보존하기 위해 일부 HTML, CSS 및 확장된 fenced code block 문법을 함께 사용합니다.
-
-따라서 사용하는 Markdown 뷰어의 기능과 보안 정책에 따라 다음 요소의 표시 결과가 달라질 수 있습니다.
-
-```
-HTML 태그 — <span>, <u>, <table>, <div> 등의 HTML 렌더링 여부
-인라인 CSS — 글자색, 배경색, 글자 크기, 이미지 크기 등의 스타일 적용 여부
-<style> 태그 — 인용구, 구분선 등 네이버 고유 디자인을 위한 CSS 적용 여부
-HTML Table — rowspan, colspan, 셀 정렬 등 복잡한 표의 표시 방식
-YouTube iframe — <iframe> 허용 여부에 따른 YouTube 영상 표시 여부
-HTML5 Video — <video> 및 <source> 지원 여부에 따른 로컬 동영상 재생 여부
-로컬 파일 링크 — 이미지, 동영상, 첨부파일 등 상대 경로로 연결된 파일의 접근 가능 여부
-Code Block — {se-l-default}, {se-l-code_stripe}, {se-l-code_black} 등의 info string 처리 방식
-체크박스 — - [ ] 문법의 Task List 지원 여부
-Markdown과 HTML 혼합 — HTML 내부의 Markdown을 다시 해석하는 방식의 차이
-CSS Sprite — 구분선 등 외부 CSS 이미지 리소스를 사용하는 요소의 표시 여부
-```
-
-특히 GitHub, VS Code, Obsidian, 일반 Markdown 편집기, 브라우저 기반 Markdown 뷰어 등은 HTML/CSS 허용 범위가 서로 다르므로 index.md의 화면이 완전히 동일하지 않을 수 있습니다.

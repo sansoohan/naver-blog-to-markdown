@@ -19,7 +19,9 @@ function getCodeLayout(component) {
   for (const candidate of candidates) {
     if (!candidate?.length) continue;
 
-    const className = getClassList(candidate).find(name => /^se-l-/i.test(name));
+    const className = getClassList(candidate).find(name => {
+      return /^se-l-/i.test(name);
+    });
 
     if (className) return className;
   }
@@ -67,26 +69,14 @@ function getStructuredCodeText($, container) {
   return null;
 }
 
-function getCodeTextFromHtml($, container) {
-  const clone = container.clone();
-  const breakToken = "NAVERCODELINEBREAKTOKEN";
-
-  clone.find("br").replaceWith(breakToken);
-
-  let text = normalizeNewlines(clone.text());
-  text = text.split(breakToken).join("\n");
-
-  return text;
-}
-
 function cleanCodeText(text) {
   let lines = normalizeNewlines(text).split("\n");
 
   /*
    * 코드 컨테이너 자체의 앞뒤에 생긴 빈 줄만 제거한다.
    *
-   * 각 코드 줄의 leading whitespace는 절대 건드리지 않는다.
-   * 실제 코드 indentation일 수 있기 때문이다.
+   * 각 코드 줄의 leading whitespace는 실제 코드 indentation일 수 있으므로
+   * 절대 제거하지 않는다.
    */
   while (lines.length && !lines[0].trim()) lines.shift();
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
@@ -102,15 +92,15 @@ function getCodeText($, component) {
   /*
    * 네이버 SmartEditor의 실제 코드 본문.
    *
-   * 바깥 .se-module-code의 text()를 읽으면 HTML formatting whitespace가
-   * 섞일 수 있으므로 __se_code_view를 최우선으로 사용한다.
+   * <br>의 전역 Markdown 여백 처리는 make-markdown.js가 담당한다.
+   * code.js에서는 코드 컨테이너의 실제 텍스트만 읽는다.
    */
   if (container.hasClass("__se_code_view")) {
-    return cleanCodeText(getCodeTextFromHtml($, container));
+    return cleanCodeText(container.text());
   }
 
   /*
-   * line 단위 DOM이 존재하는 변형.
+   * 줄 단위 DOM이 존재하는 코드블록은 각 줄을 결합한다.
    */
   const structured = getStructuredCodeText($, container);
 
@@ -119,22 +109,21 @@ function getCodeText($, component) {
   }
 
   /*
-   * <pre>/<code>는 내부 whitespace 자체가 코드 데이터이므로
+   * <pre>와 <code>는 내부 whitespace 자체가 코드 데이터이므로
    * 각 줄의 앞쪽 공백을 제거하지 않는다.
    */
   if (container.is("pre, code")) {
     return cleanCodeText(container.text());
   }
 
-  /*
-   * 그 외 <br> 기반 구조.
-   */
-  return cleanCodeText(getCodeTextFromHtml($, container));
+  return cleanCodeText(container.text());
 }
 
 function getFence(code) {
   const matches = String(code).match(/`+/g) || [];
-  const longest = matches.reduce((max, value) => Math.max(max, value.length), 0);
+  const longest = matches.reduce((max, value) => {
+    return Math.max(max, value.length);
+  }, 0);
 
   return "`".repeat(Math.max(3, longest + 1));
 }
@@ -155,12 +144,12 @@ function protectCodeBlocks($, root, store) {
     const markdown = makeCodeMarkdown(layout, code);
 
     component.replaceWith(
-      `<div class="naver-protected">${store.add(markdown)}</div>`
+      `<div class="naver-protected">${store.add(markdown)}</div>`,
     );
   }
 
   /*
-   * component wrapper가 없는 구형/변형 코드 블록.
+   * component wrapper가 없는 구형 또는 변형 코드블록.
    */
   const leftovers = root.find(".se-section-code").toArray();
 
@@ -174,7 +163,7 @@ function protectCodeBlocks($, root, store) {
     const markdown = makeCodeMarkdown(layout, code);
 
     section.replaceWith(
-      `<div class="naver-protected">${store.add(markdown)}</div>`
+      `<div class="naver-protected">${store.add(markdown)}</div>`,
     );
   }
 }

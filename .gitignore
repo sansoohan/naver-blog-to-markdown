@@ -27,3 +27,6 @@ Thumbs.db
 # 임시 파일
 *.tmp
 *.temp
+
+# 네이버 로그인
+.auth/
