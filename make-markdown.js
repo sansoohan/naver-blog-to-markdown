@@ -4,11 +4,7 @@ const TurndownService = require("turndown");
 const { protectTextComponents } = require("./src/paragraph");
 const { protectTables } = require("./src/table");
 const { protectQuotes } = require("./src/quote");
-const {
-  protectHorizontalLines,
-  getHorizontalLineCss,
-} = require("./src/horizontal-line");
-
+const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
 const { protectCodeBlocks } = require("./src/code");
 const { protectAttachments } = require("./src/attachment");
 const { protectYouTube, protectNaverVideos } = require("./src/video");
@@ -20,9 +16,7 @@ function createStore() {
   return {
     add(value) {
       const token = `NAVERPLACEHOLDER${String(++index).padStart(8, "0")}END`;
-
       values.set(token, String(value));
-
       return token;
     },
 
@@ -36,10 +30,7 @@ function createStore() {
       for (let pass = 0; pass <= values.size; pass++) {
         const previous = result;
 
-        for (const [token, value] of values) {
-          result = result.split(token).join(value);
-        }
-
+        for (const [token, value] of values) result = result.split(token).join(value);
         if (result === previous) break;
       }
 
@@ -59,10 +50,7 @@ function createTurndown() {
 
   turndown.addRule("protected", {
     filter(node) {
-      return (
-        node.nodeName === "DIV"
-        && node.classList.contains("naver-protected")
-      );
+      return node.nodeName === "DIV" && node.classList.contains("naver-protected");
     },
 
     replacement(content, node) {
@@ -81,14 +69,41 @@ function createTurndown() {
   return turndown;
 }
 
-function getPostRoot($) {
+function getLegacyPostRoot($) {
+  const content = $("#postViewArea,.se3_view,.post-view,.post-view > .view,.view").first();
+
+  if (content.length) {
+    const post = content.closest(".post._post_wrap,.post").first();
+    if (post.length) return post;
+    return content;
+  }
+
+  return $(".post._post_wrap,.post").first();
+}
+
+function getPostRoot($, editorVersion = 0) {
+  /*
+   * SmartEditor 1.x / 2.x:
+   * make-html.js와 동일하게 글 전체 .post 래퍼를 사용한다.
+   *
+   * 구형 첨부파일은 .post 안에 삽입되므로 #postViewArea만 선택하면
+   * Markdown 변환 시 첨부파일 영역이 빠질 수 있다.
+   */
+  if (editorVersion === 1 || editorVersion === 2) {
+    const legacy = getLegacyPostRoot($);
+    if (legacy.length) return legacy;
+  }
+
+  /*
+   * SmartEditor 3.x 이상
+   */
   const root = $(".se-main-container").first();
   if (root.length) return root;
 
-  const postView = $("#postViewArea").first();
-  if (postView.length) return postView;
-
-  const legacy = $(".se3_view").first();
+  /*
+   * fallback
+   */
+  const legacy = getLegacyPostRoot($);
   if (legacy.length) return legacy;
 
   throw new Error("original.html에서 본문 영역을 찾을 수 없습니다.");
@@ -115,21 +130,14 @@ function normalizeBreakSpacing(markdown) {
 
     let count = 1;
 
-    while (
-      index + count < lines.length
-      && lines[index + count].trim().toLowerCase() === "<br>"
-    ) {
-      count++;
-    }
+    while (index + count < lines.length && lines[index + count].trim().toLowerCase() === "<br>") count++;
 
     /*
      * <br>이 3개 이상 연속되면 2개까지만 남긴다.
      */
     const preservedCount = Math.min(count, 2);
 
-    for (let offset = 0; offset < preservedCount; offset++) {
-      result.push("<br>");
-    }
+    for (let offset = 0; offset < preservedCount; offset++) result.push("<br>");
 
     index += count - 1;
 
@@ -141,9 +149,7 @@ function normalizeBreakSpacing(markdown) {
      */
     const nextLine = lines[index + 1];
 
-    if (nextLine !== undefined && nextLine.trim() !== "") {
-      result.push("");
-    }
+    if (nextLine !== undefined && nextLine.trim() !== "") result.push("");
   }
 
   return result.join("\n");
@@ -159,10 +165,7 @@ function cleanMarkdown(markdown) {
 }
 
 function escapeMarkdownAlt(value) {
-  return String(value)
-    .replace(/\\/g, "\\\\")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
+  return String(value).replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
 }
 
 function protectImages($, root, store) {
@@ -183,15 +186,12 @@ function protectImages($, root, store) {
       if (!src) continue;
 
       const alt = escapeMarkdownAlt(image.attr("alt") || "");
-
       parts.push(`![${alt}](${src})`);
     }
 
     if (!parts.length) continue;
 
-    component.replaceWith(
-      `<div class="naver-protected">${store.add(parts.join("\n\n"))}</div>`,
-    );
+    component.replaceWith(`<div class="naver-protected">${store.add(parts.join("\n\n"))}</div>`);
   }
 }
 
@@ -202,15 +202,12 @@ function protectStandaloneImages($, root, store) {
     if (image.closest(".naver-protected").length) return;
 
     const src = image.attr("src") || "";
-
     if (!src) return;
 
     const alt = escapeMarkdownAlt(image.attr("alt") || "");
     const markdown = `![${alt}](${src})`;
 
-    image.replaceWith(
-      `<div class="naver-protected">${store.add(markdown)}</div>`,
-    );
+    image.replaceWith(`<div class="naver-protected">${store.add(markdown)}</div>`);
   });
 }
 
@@ -224,36 +221,13 @@ function protectOgCards($, root, store) {
     if (!link.length) continue;
 
     const href = link.attr("href") || "";
-
-    const title = component
-      .find(".se-oglink-title")
-      .first()
-      .text()
-      .trim()
-      || link.attr("title")
-      || href;
-
-    const summary = component
-      .find(".se-oglink-summary")
-      .first()
-      .text()
-      .trim();
-
-    const domain = component
-      .find(".se-oglink-url")
-      .first()
-      .text()
-      .trim();
-
+    const title = component.find(".se-oglink-title").first().text().trim() || link.attr("title") || href;
+    const summary = component.find(".se-oglink-summary").first().text().trim();
+    const domain = component.find(".se-oglink-url").first().text().trim();
     const imageSrc = component.find("img").first().attr("src") || "";
     const parts = [];
 
-    if (imageSrc) {
-      parts.push(
-        `<img src="${escapeHtmlAttribute(imageSrc)}" `
-        + `style="max-width:120px;height:auto;">`,
-      );
-    }
+    if (imageSrc) parts.push(`<img src="${escapeHtmlAttribute(imageSrc)}" style="max-width:120px;height:auto;">`);
 
     const text = [
       title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
@@ -261,29 +235,19 @@ function protectOgCards($, root, store) {
       domain ? `<small>${escapeHtmlText(domain)}</small>` : "",
     ].filter(Boolean).join("<br>");
 
-    parts.push(
-      `<a href="${escapeHtmlAttribute(href)}">${text}</a>`,
-    );
+    parts.push(`<a href="${escapeHtmlAttribute(href)}">${text}</a>`);
 
     const html = `<div class="naver-og-card">${parts.join("")}</div>`;
-
-    component.replaceWith(
-      `<div class="naver-protected">${store.add(html)}</div>`,
-    );
+    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
   }
 }
 
 function escapeHtmlText(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeHtmlAttribute(value) {
-  return escapeHtmlText(value)
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return escapeHtmlText(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function removeArchiveOnlyElements(root) {
@@ -297,24 +261,14 @@ function isForeignFormattedBlock($, element) {
   const style = node.attr("style") || "";
 
   if (tagName === "pre") return true;
-
-  if (
-    /\b(?:hljs|highlight|codehilite|syntaxhighlighter|prettyprint)\b/i
-      .test(className)
-  ) {
-    return true;
-  }
-
+  if (/\b(?:hljs|highlight|codehilite|syntaxhighlighter|prettyprint)\b/i.test(className)) return true;
   if (/\blanguage-[\w-]+\b/i.test(className)) return true;
   if (/\bwhite-space\s*:\s*pre(?:-wrap)?\b/i.test(style)) return true;
 
-  if (!/^(?:div|section|article|aside)$/i.test(tagName)) {
-    return false;
-  }
+  if (!/^(?:div|section|article|aside)$/i.test(tagName)) return false;
 
   const hasComplexBoxStyle = (
-    /(?:background(?:-color)?|border|display\s*:\s*(?:flex|grid)|font-family)\s*:/i
-      .test(style)
+    /(?:background(?:-color)?|border|display\s*:\s*(?:flex|grid)|font-family)\s*:/i.test(style)
   );
 
   const styledChildren = node.find("[style]").length;
@@ -334,10 +288,7 @@ function protectForeignFormattedBlocks($, root, store) {
     "[style]",
   ].join(", ");
 
-  const candidates = root
-    .find(selector)
-    .add(root.filter(selector))
-    .toArray();
+  const candidates = root.find(selector).add(root.filter(selector)).toArray();
 
   for (const element of candidates) {
     const node = $(element);
@@ -348,32 +299,21 @@ function protectForeignFormattedBlocks($, root, store) {
 
     const formattedParent = node.parents().toArray().find(parent => {
       if (parent === root[0]) return false;
-
       return isForeignFormattedBlock($, parent);
     });
 
     if (formattedParent) continue;
 
     const html = $.html(element);
-
-    node.replaceWith(
-      `<div class="naver-protected">${store.add(html)}</div>`,
-    );
+    node.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
   }
 }
 
 function makeMarkdown(originalHtml, options = {}) {
-  const {
-    title = "untitled",
-    blogId = "",
-    logNo = "",
-  } = options;
+  const { title = "untitled", blogId = "", logNo = "", editorVersion = 0 } = options;
 
-  const $ = cheerio.load(originalHtml, {
-    decodeEntities: false,
-  });
-
-  const root = getPostRoot($);
+  const $ = cheerio.load(originalHtml, { decodeEntities: false });
+  const root = getPostRoot($, editorVersion);
   const store = createStore();
 
   /*
@@ -390,11 +330,7 @@ function makeMarkdown(originalHtml, options = {}) {
   protectTables($, root, store);
   protectQuotes($, root, store);
 
-  const horizontalLineTypes = protectHorizontalLines(
-    $,
-    root,
-    store,
-  );
+  const horizontalLineTypes = protectHorizontalLines($, root, store);
 
   /*
    * 네이버 고유 코드블록은 Markdown fenced code로 변환한다.
@@ -411,9 +347,7 @@ function makeMarkdown(originalHtml, options = {}) {
 
   const turndown = createTurndown();
 
-  let markdown = turndown.turndown(
-    root.html() || "",
-  );
+  let markdown = turndown.turndown(root.html() || "");
 
   markdown = store.restore(markdown);
   markdown = restoreEmptyLines(markdown);
@@ -425,21 +359,11 @@ function makeMarkdown(originalHtml, options = {}) {
   markdown = normalizeBreakSpacing(markdown);
   markdown = cleanMarkdown(markdown);
 
-  const originalUrl = blogId && logNo
-    ? `https://blog.naver.com/${blogId}/${logNo}`
-    : "";
+  const originalUrl = blogId && logNo ? `https://blog.naver.com/${blogId}/${logNo}` : "";
+  const header = originalUrl ? `# ${title}\n\n> 원본: ${originalUrl}` : `# ${title}`;
+  const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
 
-  const header = originalUrl
-    ? `# ${title}\n\n> 원본: ${originalUrl}`
-    : `# ${title}`;
-
-  const horizontalLineCss = getHorizontalLineCss(
-    horizontalLineTypes,
-  );
-
-  return `${header}${horizontalLineCss
-    ? `\n\n${horizontalLineCss}`
-    : ""}\n\n${markdown}\n`;
+  return `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
 }
 
 module.exports = {

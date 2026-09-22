@@ -9,7 +9,7 @@
 Node.js 20 이상이 필요합니다.
 
 ```bash
-git clone REPOSITORY_URL
+git clone https://github.com/sansoohan/naver-blog-to-markdown
 cd naver-blog-to-markdown
 npm install
 ```
@@ -53,8 +53,6 @@ output/
             └── download/             # 첨부파일
                 └── 자료.zip
 ```
-
-## 지원 에디터
 
 ## 지원 에디터
 
