@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
 const {
@@ -10,6 +12,22 @@ const {
   getLeafCategories,
   getPostCategories,
 } = require("./src/category");
+
+const CACHE_FILE = path.join(process.cwd(), "output", "backup-cache.json");
+
+function loadBackupCache() {
+  if (!fs.existsSync(CACHE_FILE)) return {};
+
+  try {
+    return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function isPostCached(cache, blogId, logNo) {
+  return Boolean(cache[`${blogId}/${logNo}`] || cache[String(logNo)]);
+}
 
 function ask(question) {
   const rl = readline.createInterface({input: process.stdin, output: process.stdout});
@@ -82,6 +100,8 @@ async function backupPosts(blogId, posts, options = {}) {
     return {total: 0, created: 0, updated: 0, skipped: 0, failed: 0, updatedPosts: []};
   }
 
+  const cache = loadBackupCache();
+
   let created = 0;
   let updated = 0;
   let skipped = 0;
@@ -97,6 +117,13 @@ async function backupPosts(blogId, posts, options = {}) {
     console.log(`[${index + 1}/${posts.length}] ${post.title || post.logNo}`);
     console.log(`카테고리: ${post.categoryPath.join(" > ")}`);
 
+    if (isPostCached(cache, blogId, post.logNo)) {
+      skipped++;
+      console.log(`이미 백업됨: ${post.logNo}`);
+      console.log("");
+      continue;
+    }
+
     try {
       const result = await convertPost(blogId, post.logNo, {
         skipUnchanged: true,
@@ -105,12 +132,17 @@ async function backupPosts(blogId, posts, options = {}) {
         includePrivate,
       });
 
-      if (result.status === "new") created++;
-      else if (result.status === "updated") {
+      if (result.status === "new") {
+        created++;
+      } else if (result.status === "updated") {
         updated++;
         updatedPosts.push(post);
         console.log(`업데이트됨: ${post.logNo} ${post.title}`);
-      } else if (result.status === "skipped") skipped++;
+      } else if (result.status === "skipped") {
+        skipped++;
+      }
+
+      cache[`${blogId}/${post.logNo}`] = true;
     } catch (error) {
       failed++;
       console.error(`실패: ${post.logNo} - ${error.message}`);
@@ -127,7 +159,7 @@ function printBackupSummary(label, result) {
   console.log(`전체: ${result.total}`);
   console.log(`신규: ${result.created}`);
   console.log(`업데이트: ${result.updated}`);
-  console.log(`변경 없음: ${result.skipped}`);
+  console.log(`이미 백업됨: ${result.skipped}`);
   console.log(`실패: ${result.failed}`);
 
   if (result.updatedPosts.length) {
@@ -146,27 +178,34 @@ async function backupAllCategories(url, options = {}) {
 
   const categories = await getCategoryList(blogId, {includePrivate});
   const leafCategories = getLeafCategories(categories);
-  const targetCategories = getPostCategories(categories);
+  const targetCategories = includePrivate
+    ? leafCategories.filter(category => category.postCount !== 0)
+    : getPostCategories(categories);
   const skippedCategoryCount = leafCategories.length - targetCategories.length;
   const posts = [];
   const seen = new Set();
 
-  console.log(`글이 있는 카테고리: ${targetCategories.length}개`);
+  console.log(`확인할 카테고리: ${targetCategories.length}개`);
 
   if (skippedCategoryCount) {
-    console.log(`게시글이 없거나 구분용인 카테고리: ${skippedCategoryCount}개 (건너뜀)`);
+    console.log(`게시글이 없는 것으로 확인된 카테고리: ${skippedCategoryCount}개 (건너뜀)`);
   }
 
   for (let index = 0; index < targetCategories.length; index++) {
     const category = targetCategories[index];
     const categoryPath = getCategoryPathParts(category, categories);
+    const postCount = category.postCount === null ? "?" : category.postCount;
 
     console.log(
       `글 목록 확인 중: ${index + 1}/${targetCategories.length} `
-      + `${categoryPath.join(" > ")} (${category.postCount}개)`
+      + `${categoryPath.join(" > ")} (${postCount}개)`
     );
 
-    const categoryPosts = await getAllPosts(blogId, category.categoryNo, {quiet: true, includePrivate});
+    const categoryPosts = await getAllPosts(blogId, category.categoryNo, {
+      quiet: true,
+      includePrivate,
+      allowEmptyPrivateCategory: includePrivate && category.postCount === null,
+    });
 
     for (const post of categoryPosts) {
       if (seen.has(post.logNo)) continue;

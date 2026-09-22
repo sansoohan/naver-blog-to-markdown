@@ -89,6 +89,11 @@ function isTemporaryPostListError(error) {
     || /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|UND_ERR/i.test(message);
 }
 
+function isEmptyPrivateCategoryError(error) {
+  const message = String(error?.message || error);
+  return /일시적으로 목록보기 기능에 장애가 발생하였습니다/.test(message);
+}
+
 function extractCategoryContent(text) {
   const categoryIndex = text.indexOf("category");
   if (categoryIndex === -1) throw new Error("카테고리 데이터를 찾을 수 없습니다.");
@@ -333,7 +338,7 @@ async function getPostList(blogId, categoryNo, page, options = {}) {
 }
 
 async function getPostListWithRetry(blogId, categoryNo, page, options = {}) {
-  const {includePrivate = false, maxAttempts = 5} = options;
+  const {includePrivate = false, maxAttempts = 5, allowEmptyPrivateCategory = false} = options;
   let lastError;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -341,10 +346,14 @@ async function getPostListWithRetry(blogId, categoryNo, page, options = {}) {
       return await getPostList(blogId, categoryNo, page, {includePrivate});
     } catch (error) {
       lastError = error;
+      const message = String(error?.message || error);
+
+      if (allowEmptyPrivateCategory && includePrivate && page === 1 && isEmptyPrivateCategoryError(error)) {
+        return {postList: [], totalCount: 0};
+      }
 
       if (!isTemporaryPostListError(error) || attempt === maxAttempts) throw error;
 
-      const message = String(error?.message || error);
       const isRateLimited = error?.status === 429 || /\b429\b/.test(message);
       const interval = isRateLimited ? increasePostListInterval(categoryNo) : null;
       const defaultWait = isRateLimited ? 2000 * 2 ** (attempt - 1) : 1000 * 2 ** (attempt - 1);
@@ -368,13 +377,16 @@ async function getPostListWithRetry(blogId, categoryNo, page, options = {}) {
 }
 
 async function getAllPosts(blogId, categoryNo, options = {}) {
-  const {quiet = false, includePrivate = false} = options;
+  const {quiet = false, includePrivate = false, allowEmptyPrivateCategory = false} = options;
   const posts = [];
   let page = 1;
   let totalCount = null;
 
   while (true) {
-    const data = await getPostListWithRetry(blogId, categoryNo, page, {includePrivate});
+    const data = await getPostListWithRetry(blogId, categoryNo, page, {
+      includePrivate,
+      allowEmptyPrivateCategory,
+    });
     const postList = Array.isArray(data.postList) ? data.postList : [];
 
     if (totalCount === null) {
@@ -432,7 +444,7 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
   const children = categories.filter(item => item.parentCategoryNo === category.categoryNo);
 
   if (!children.length) {
-    if(category.postCount===0) {
+    if (category.postCount === 0) {
       console.log("게시글이 없거나 구분용인 카테고리입니다.");
       return [];
     }
@@ -444,14 +456,14 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
   }
 
   const leafCategories = getDescendantLeafCategories(category, categories);
-  const targetCategories=leafCategories.filter(category=>category.postCount!==0);
+  const targetCategories = leafCategories.filter(category => category.postCount !== 0);
   const skippedCategoryCount = leafCategories.length - targetCategories.length;
 
   console.log("");
-  console.log(`글이 있는 하위 카테고리 ${targetCategories.length}개를 찾았습니다.`);
+  console.log(`확인할 하위 카테고리 ${targetCategories.length}개를 찾았습니다.`);
 
   if (skippedCategoryCount) {
-    console.log(`게시글이 없거나 구분용인 하위 카테고리 ${skippedCategoryCount}개는 건너뜁니다.`);
+    console.log(`게시글이 없는 것으로 확인된 하위 카테고리 ${skippedCategoryCount}개는 건너뜁니다.`);
   }
 
   console.log("");
@@ -461,13 +473,24 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
 
   for (const targetCategory of targetCategories) {
     const categoryPath = getCategoryPathParts(targetCategory, categories);
+    const postCount = targetCategory.postCount === null ? "?" : targetCategory.postCount;
 
-    console.log(`${categoryPath.join(" > ")} (${targetCategory.postCount}개)`);
+    console.log(`${categoryPath.join(" > ")} (${postCount}개)`);
 
     const categoryPosts = await getAllPosts(blogId, targetCategory.categoryNo, {
       quiet: true,
       includePrivate,
+      allowEmptyPrivateCategory: includePrivate && targetCategory.postCount === null,
     });
+
+    if (!categoryPosts.length) {
+      console.log("게시글 없음");
+      console.log("");
+      continue;
+    }
+
+    console.log(`게시글 ${categoryPosts.length}개`);
+    console.log("");
 
     for (const post of categoryPosts) {
       if (seen.has(post.logNo)) continue;
@@ -477,7 +500,6 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
     }
   }
 
-  console.log("");
   console.log(`게시글 ${posts.length}개를 찾았습니다.`);
   console.log("");
 
@@ -485,9 +507,7 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
 }
 
 function getLeafCategories(categories) {
-  return categories.filter(category =>
-    !categories.some(item => item.parentCategoryNo === category.categoryNo)
-  );
+  return categories.filter(category => !categories.some(item => item.parentCategoryNo === category.categoryNo));
 }
 
 function getPostCategories(categories) {

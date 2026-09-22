@@ -278,10 +278,14 @@ function wrapPostBody(body,wrappers) {
   return result;
 }
 
+function isNaverGnbCss(css) {
+  return /NTS UIT Development Office|sp_gnb_|\.gnb_|#gnb\b|gnb_notice|gnb_svc/i.test(String(css));
+}
+
 function getInlineHeadCss($) {
   return $("head style").toArray()
     .map(element=>$(element).html()||"")
-    .filter(css=>css.trim())
+    .filter(css=>css.trim()&&!isNaverGnbCss(css))
     .join("\n");
 }
 
@@ -309,6 +313,27 @@ function getArchiveOverrideCss(editorVersion) {
   return rules.join("");
 }
 
+function cleanRuntimeClasses($,root) {
+  const runtimeClasses=new Set([
+    "__se-component",
+    "se-image-loaded",
+    "egjs-visible",
+    "se-is-progress",
+    "se-section-oembed-video",
+  ]);
+
+  root.find("*").each((_,element)=>{
+    const item=$(element);
+    const className=item.attr("class");
+    if(!className) return;
+
+    const classes=className.split(/\s+/).filter(Boolean).filter(name=>!runtimeClasses.has(name));
+
+    if(classes.length) item.attr("class",classes.join(" "));
+    else item.removeAttr("class");
+  });
+}
+
 function cleanArchivedRoot($,root) {
   root.find("script").remove();
   root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn.post_btn2").remove();
@@ -322,6 +347,8 @@ function cleanArchivedRoot($,root) {
 
   root.find("[contenteditable]").removeAttr("contenteditable");
   root.find("[draggable]").removeAttr("draggable");
+
+  cleanRuntimeClasses($,root);
 }
 
 function beautifyArchivedHtml(html) {

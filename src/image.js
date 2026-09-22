@@ -219,7 +219,7 @@ function getImageCandidates(url,options={}) {
   return candidates;
 }
 
-async function fetchImageCandidate(url,timeout=20000) {
+async function fetchImageCandidate(url,timeout=1000) {
   const response=await fetch(url,{
     headers:{
       "User-Agent":"Mozilla/5.0",
@@ -249,7 +249,7 @@ async function fetchImageCandidate(url,timeout=20000) {
 }
 
 async function fetchFirstAvailableImage(candidates,options={}) {
-  const {timeout=20000}=options;
+  const {timeout=1000}=options;
   const failures=[];
 
   for(const candidate of candidates) {
@@ -310,7 +310,7 @@ function createImageManager(outputDir) {
     const {
       highResolution=false,
       fallbackPrefix="image",
-      timeout=20000,
+      timeout=1000,
     }=options;
 
     if(!url) return "";
