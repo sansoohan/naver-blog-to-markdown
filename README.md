@@ -76,3 +76,24 @@ output/
 - 외부 에디터에서 붙여 넣은 복잡한 HTML 서식
 
 Markdown으로 안전하게 표현할 수 없는 표·색상·복잡한 코드블록·인라인 서식은 HTML로 남겨 원본 모양을 최대한 유지합니다.
+
+## QA 테스터
+
+백업 결과의 `original.html`과 `index.md` 렌더링 결과를 나란히 비교하는 도구입니다.
+
+처음 한 번만 QA 도구의 의존성을 설치합니다.
+
+```bash
+npm install --prefix test
+npm install --prefix test/server
+```
+
+QA 테스터를 실행합니다.
+
+```bash
+npm run test:gui
+```
+
+클라이언트와 서버가 함께 실행됩니다. 터미널에 표시된 주소(기본 `http://localhost:5173`)를 브라우저에서 엽니다.
+
+`output/` 폴더에 백업된 게시글이 있어야 목록에 표시됩니다.
