@@ -87,6 +87,7 @@ async function setupWindowControl() {
 
   try {
     cdpSession=await context.newCDPSession(page);
+
     const result=await cdpSession.send("Browser.getWindowForTarget");
     windowId=result.windowId;
   } catch {
@@ -155,37 +156,57 @@ async function saveAuthState() {
   } catch {}
 }
 
-async function registerDeviceIfAvailable() {
-  if(!page||page.isClosed()) return false;
+async function isDeviceRegistrationPromptVisible() {
+  if(!context) return false;
 
   const selectors=[
-    'button:has-text("기기 등록")',
-    'button:has-text("이 기기 등록")',
-    'a:has-text("기기 등록")',
-    'a:has-text("이 기기 등록")',
-    'input[value*="기기 등록"]',
+    'text=이 기기 등록',
+    'text=이 기기를 등록',
+    'text=기기 등록',
+    'text=새로운 기기',
+    'text=새 기기',
   ];
 
-  for(const selector of selectors) {
-    const target=page.locator(selector).first();
+  for(const currentPage of context.pages()) {
+    if(currentPage.isClosed()) continue;
 
-    try {
-      if(!await target.isVisible()) continue;
-
-      await target.click({timeout:3000});
-      console.log("기기 등록 버튼을 자동으로 눌렀습니다.");
-      await page.waitForTimeout(500);
-
-      return true;
-    } catch {}
+    for(const scope of [currentPage,...currentPage.frames()]) {
+      for(const selector of selectors) {
+        try {
+          if(await scope.locator(selector).first().isVisible()) return true;
+        } catch {}
+      }
+    }
   }
 
   return false;
 }
 
+async function waitForDeviceRegistrationChoice(startedAt) {
+  if(!await isDeviceRegistrationPromptVisible()) return false;
+
+  console.log("이 기기 등록 화면이 표시되었습니다.");
+  console.log("브라우저에서 직접 등록 또는 건너뛰기를 선택해주세요.");
+
+  await showBrowser();
+
+  while(Date.now()-startedAt<LOGIN_TIMEOUT) {
+    await delay(500);
+
+    /*
+     * 사용자가 등록 또는 건너뛰기를 선택하기 전에는
+     * 다른 페이지로 이동하거나 소유자 권한을 확인하지 않는다.
+     */
+    if(!await isDeviceRegistrationPromptVisible()) return true;
+
+    await showBrowser();
+  }
+
+  throw new Error("이 기기 등록 선택 시간이 초과되었습니다.");
+}
+
 async function verifyNaverLogin() {
   if(!page||page.isClosed()) return false;
-
   if(await hasLoginCookie()) return true;
 
   try {
@@ -208,27 +229,32 @@ async function verifyBlogOwner(blogId) {
   if(!page||page.isClosed()||!blogId) return false;
   if(!await verifyNaverLogin()) return false;
 
-  const writeUrl=`https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}`;
+  const writeUrl="https://blog.naver.com/PostWriteForm.naver?blogId="
+    +encodeURIComponent(blogId);
 
   try {
     await page.goto(writeUrl,{waitUntil:"domcontentloaded",timeout:60000});
 
-    if(isLoginUrl(page.url())) return false;
-
+    const finalUrl=page.url();
     const html=await page.content();
 
-    return !/로그인이 필요|로그인 후 이용|권한이 없|접근 권한/i.test(html);
+    if(isLoginUrl(finalUrl)) return false;
+    if(/로그인이 필요|로그인 후 이용|권한이 없|접근 권한/i.test(html)) return false;
+
+    return finalUrl.includes("PostWriteForm.naver")||/글쓰기|publish|editor/i.test(html);
   } catch {
     return false;
   }
 }
 
-async function verifyAuth() {
-  return verifyNaverLogin();
+async function verifyAuth(blogId="") {
+  return blogId?verifyBlogOwner(blogId):verifyNaverLogin();
 }
 
-async function waitForLogin() {
+async function waitForLogin(blogId="") {
   console.log("브라우저에서 네이버에 로그인해주세요.");
+
+  if(blogId) console.log("로그인 후 블로그 소유자 권한까지 확인합니다.");
 
   await showBrowser();
   await page.goto(LOGIN_URL,{waitUntil:"domcontentloaded",timeout:60000});
@@ -236,25 +262,53 @@ async function waitForLogin() {
   const startedAt=Date.now();
 
   while(Date.now()-startedAt<LOGIN_TIMEOUT) {
-    await delay(1500);
+    await delay(1000);
 
-    if(isLoginUrl(page.url())) continue;
+    /*
+     * 로그인 URL 위에 기기 등록 화면이 뜰 수 있다.
+     * 선택하기 전에는 continue나 page.goto를 실행하지 않는다.
+     */
+    await waitForDeviceRegistrationChoice(startedAt);
 
-    if(await verifyNaverLogin()) {
-      await registerDeviceIfAvailable();
-      await saveAuthState();
-      console.log("네이버 로그인 정보 저장 완료");
-      await minimizeBrowser();
-      return;
+    if(isLoginUrl(page.url())) {
+      await showBrowser();
+      continue;
     }
 
-    await showBrowser();
+    if(!await verifyNaverLogin()) {
+      await showBrowser();
+      continue;
+    }
+
+    /*
+     * 로그인 완료 직후 늦게 표시되는 등록 화면도 먼저 처리한다.
+     * 이 함수가 끝날 때까지 verifyBlogOwner()가 다른 주소로 이동하지 않는다.
+     */
+    const deviceChoiceMade=await waitForDeviceRegistrationChoice(startedAt);
+
+    if(deviceChoiceMade) await minimizeBrowser();
+
+    if(blogId&&!await verifyBlogOwner(blogId)) {
+      console.log("로그인한 계정에 이 블로그의 관리 권한이 없습니다.");
+      console.log("브라우저에서 올바른 계정으로 다시 로그인해주세요.");
+
+      await showBrowser();
+      await page.goto(LOGIN_URL,{waitUntil:"domcontentloaded",timeout:60000});
+      continue;
+    }
+
+    await saveAuthState();
+
+    console.log("네이버 로그인 정보 저장 완료");
+
+    await minimizeBrowser();
+    return;
   }
 
   throw new Error("네이버 로그인 확인 시간이 초과되었습니다.");
 }
 
-async function ensureLogin() {
+async function ensureLogin(blogId="") {
   const savedState=hasSavedAuthState();
   const savedProfile=hasSavedProfile();
 
@@ -269,15 +323,18 @@ async function ensureLogin() {
   await launchBrowser();
 
   if(savedState) {
-    console.log("저장된 네이버 로그인 상태를 확인합니다...");
+    const label=blogId?"저장된 블로그 소유자 세션":"저장된 네이버 로그인 상태";
 
-    if(await verifyNaverLogin()) {
+    console.log(`${label}을 확인합니다...`);
+
+    if(await verifyAuth(blogId)) {
       console.log("저장된 네이버 로그인 세션을 사용합니다.");
+
       await minimizeBrowser();
       return;
     }
 
-    console.log("저장된 네이버 로그인 세션이 만료되었습니다.");
+    console.log("저장된 네이버 로그인 세션이 만료되었거나 블로그 관리 권한이 없습니다.");
 
     try {
       fs.unlinkSync(AUTH_STATE_FILE);
@@ -285,17 +342,19 @@ async function ensureLogin() {
   }
 
   console.log("네이버 로그인이 필요합니다.");
-  await waitForLogin();
+
+  await waitForLogin(blogId);
 }
 
-async function forceLogin() {
+async function forceLogin(blogId="") {
   await launchBrowser();
 
   console.log("네이버 로그인을 다시 진행합니다.");
+
   await showBrowser();
   await page.goto(LOGIN_URL,{waitUntil:"domcontentloaded",timeout:60000});
 
-  await waitForLogin();
+  await waitForLogin(blogId);
 }
 
 async function getAuthContext() {
@@ -346,6 +405,6 @@ module.exports={
   getAuthPage,
   minimizeBrowser,
   showBrowser,
-  registerDeviceIfAvailable,
+  isDeviceRegistrationPromptVisible,
   closeAuth,
 };

@@ -432,10 +432,8 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
   const children = categories.filter(item => item.parentCategoryNo === category.categoryNo);
 
   if (!children.length) {
-    if (!(category.postCount > 0)) {
-      console.log("");
+    if(category.postCount===0) {
       console.log("게시글이 없거나 구분용인 카테고리입니다.");
-      console.log("");
       return [];
     }
 
@@ -446,7 +444,7 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
   }
 
   const leafCategories = getDescendantLeafCategories(category, categories);
-  const targetCategories = leafCategories.filter(item => item.postCount > 0);
+  const targetCategories=leafCategories.filter(category=>category.postCount!==0);
   const skippedCategoryCount = leafCategories.length - targetCategories.length;
 
   console.log("");
