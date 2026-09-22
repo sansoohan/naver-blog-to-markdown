@@ -56,11 +56,15 @@ output/
 
 ## 지원 에디터
 
+## 지원 에디터
+
 | 에디터 | 본문 영역 | 저장 CSS |
 | --- | --- | --- |
 | SmartEditor 1.x | `#postViewArea`, `.post-view`, `.view` | `PostView.css` |
 | SmartEditor 2.x | `#postViewArea`, `.post-view`, `.se3_view` | `PostView.css` |
-| SmartEditor 3.x 이상 | `.se-viewer`, `.se-main-container` | `se.viewer.desktop.css` |
+| SmartEditor 3.x | `.se-viewer`, `.se-main-container` | `se.viewer.desktop.css` |
+| SmartEditor 4.x (SmartEditor ONE) | `.wrap_rabbit`, `.se-viewer`, `.se-main-container` | `se.viewer.desktop.css` |
+
 
 에디터 버전은 게시글 HTML에서 자동으로 판별합니다.
 
