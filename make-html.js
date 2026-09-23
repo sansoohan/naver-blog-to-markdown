@@ -13,9 +13,7 @@ function normalizeEditorVersion(value) {
 
 function detectEditorVersion($) {
   const html=$.html();
-  const socialMatch=$("#socialPluginInfoJson").text()
-    .match(/\bsmartEditorVersion["']?\s*:\s*["']?(\d+)["']?/i);
-
+  const socialMatch=$("#socialPluginInfoJson").text().match(/\bsmartEditorVersion["']?\s*:\s*["']?(\d+)["']?/i);
   if(socialMatch) return normalizeEditorVersion(socialMatch[1]);
 
   const match=html.match(/\bsmartEditorVersion(?:&(?:quot|#034);|["'])?\s*:\s*["']?(\d+)["']?/i);
@@ -31,22 +29,22 @@ function detectEditorVersion($) {
   const editorVersion=$("[data-post-editor-version]").first().attr("data-post-editor-version");
   if(normalizeEditorVersion(editorVersion)) return Number(editorVersion);
 
-  /* SmartEditor 1.x */
+  /* 버전 1 */
   if($("#postViewArea .post-view > .view").length) return 1;
 
-  /* SmartEditor 2.x */
+  /* 버전 2 */
   if($("#postViewArea .post-view,.post-view,.se3_view,.view").length) return 2;
 
-  /* SmartEditor ONE 4.x */
+  /* 버전 4 */
   if($(".wrap_rabbit .se-viewer .se-main-container").length) return 4;
 
-  /* SmartEditor 3.x */
+  /* 버전 3 */
   if($(".se-viewer .se-main-container,.se-main-container").length) return 3;
 
   return 0;
 }
 
-function getLegacyPostRoot($) {
+function getVersion12PostRoot($) {
   const content=$("#postViewArea,.se3_view,.post-view,.post-view > .view,.view").first();
 
   if(content.length) {
@@ -60,18 +58,18 @@ function getLegacyPostRoot($) {
 
 function getPostRoot($,editorVersion) {
   /*
-   * SmartEditor 1.x·2.x:
+   * 버전 1·2:
    * #postViewArea만 빼면 PostView.css의 .post, .post-back, .post-body,
    * .bcc 관련 구조가 끊긴다. 따라서 글 전체 .post 래퍼를 보존한다.
    */
   if(editorVersion===1||editorVersion===2) {
-    const legacy=getLegacyPostRoot($);
-    if(legacy.length) return legacy;
+    const version12=getVersion12PostRoot($);
+    if(version12.length) return version12;
   }
 
   /*
-   * SmartEditor 3.x 이상:
-   * .se-main-container를 본문으로 사용하고 실제 조상 래퍼를 복원한다.
+   * 버전 3·4:
+   * .se-main-container를 본문으로 사용하고 실제 원본 조상 래퍼는 prepareWrapperPath()에서 그대로 복원한다.
    */
   const smartEditor=$(".se-viewer .se-main-container").first();
   if(smartEditor.length) return smartEditor;
@@ -79,8 +77,8 @@ function getPostRoot($,editorVersion) {
   const mainContainer=$(".se-main-container").first();
   if(mainContainer.length) return mainContainer;
 
-  const legacy=getLegacyPostRoot($);
-  if(legacy.length) return legacy;
+  const version12=getVersion12PostRoot($);
+  if(version12.length) return version12;
 
   throw new Error("본문 영역을 찾을 수 없습니다.");
 }
@@ -106,11 +104,7 @@ function getStylesheetInfo($,pattern,filename) {
 }
 
 function getLayoutCssInfo($) {
-  return getStylesheetInfo(
-    $,
-    /(?:LayoutTopCommon|PostTopCommon|PostViewCommon|PostListCommon).*\.css/i,
-    "blog-layout.css"
-  );
+  return getStylesheetInfo($,/(?:LayoutTopCommon|PostTopCommon|PostViewCommon|PostListCommon).*\.css/i,"blog-layout.css");
 }
 
 function getPostViewCssInfo($) {
@@ -118,16 +112,11 @@ function getPostViewCssInfo($) {
 }
 
 function getViewerCssInfo($,editorVersion) {
-  /*
-   * SmartEditor 3.x 이상 Viewer CSS.
-   */
-  if(editorVersion===3) {
+  if(editorVersion===3||editorVersion===4) {
     return getStylesheetInfo($,/se\.viewer\.desktop(?:\.min)?\.css/i,"se.viewer.desktop.css");
   }
 
-  /* SmartEditor 1.x·2.x Viewer CSS */
   if(editorVersion===1||editorVersion===2) return getPostViewCssInfo($);
-
   return null;
 }
 
@@ -140,9 +129,7 @@ function rewriteCssUrls(css,cssUrl) {
   return String(css).replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,(match,quote,value)=>{
     const source=String(value).trim();
 
-    if(!source||source.startsWith("data:")||source.startsWith("blob:")||source.startsWith("#")) {
-      return match;
-    }
+    if(!source||source.startsWith("data:")||source.startsWith("blob:")||source.startsWith("#")) return match;
 
     try {
       return `url("${new URL(source,cssUrl)}")`;
@@ -192,7 +179,7 @@ async function downloadPostViewCss($,outputDir,editorVersion) {
 }
 
 async function downloadViewerCss($,outputDir,editorVersion) {
-  if(editorVersion!==3) return "";
+  if(editorVersion!==3&&editorVersion!==4) return "";
 
   const info=getViewerCssInfo($,editorVersion);
   if(!info) return "";
@@ -227,11 +214,6 @@ function prepareWrapperPath(root,editorVersion) {
   const wrappers=[];
   let current=root.parent();
 
-  /*
-   * SmartEditor 1.x·2.x·3.x:
-   * 사이드바까지 포함하는 #twocols는 아카이브 본문에 필요 없다.
-   * #content-area만 남겨 단일 본문 레이아웃으로 복원한다.
-   */
   while(current.length&&!current.is("body,html")) {
     if(current.attr("id")==="twocols") {
       current=current.parent();
@@ -240,21 +222,13 @@ function prepareWrapperPath(root,editorVersion) {
 
     const descriptor=getElementDescriptor(current.get(0));
     if(descriptor) wrappers.unshift(descriptor);
-
     current=current.parent();
   }
 
-  /*
-   * SmartEditor 3.x 이상:
-   * 일부 글은 .se-viewer 조상이 원본 HTML에 없으므로 보완한다.
-   */
-  if(editorVersion===3&&!wrappers.some(wrapper=>{
+  if((editorVersion===3||editorVersion===4)&&!wrappers.some(wrapper=>{
     return String(wrapper.attributes.class||"").split(/\s+/).includes("se-viewer");
   })) {
-    wrappers.push({
-      tagName:"div",
-      attributes:{class:"se-viewer se-theme-default",lang:"ko-KR"},
-    });
+    wrappers.push({tagName:"div",attributes:{class:"se-viewer se-theme-default",lang:"ko-KR"}});
   }
 
   return wrappers;
@@ -283,30 +257,21 @@ function isNaverGnbCss(css) {
 }
 
 function getInlineHeadCss($) {
-  return $("head style").toArray()
-    .map(element=>$(element).html()||"")
-    .filter(css=>css.trim()&&!isNaverGnbCss(css))
-    .join("\n");
+  return $("head style").toArray().map(element=>$(element).html()||"").filter(css=>{
+    return css.trim()&&!isNaverGnbCss(css);
+  }).join("\n");
 }
 
 function getArchiveOverrideCss(editorVersion) {
-  /*
-   * 다운로드한 원본 CSS 파일은 수정하지 않는다.
-   * original.html의 마지막 style에서 아카이브 레이아웃만 보정한다.
-   */
-  if(editorVersion!==1&&editorVersion!==2&&editorVersion!==3) return "";
+  if(editorVersion!==1&&editorVersion!==2&&editorVersion!==3&&editorVersion!==4) return "";
 
   const rules=[
-    `#body{width:100%;max-width:982px;}`,
-    `#wrapper{width:100%;max-width:966px;box-sizing:border-box;}`,
-    `#content-area{display:block;float:none;margin:0 auto;}`,
+    `#body{width:100%;max-width:none;margin:0 auto;}`,
+    `#wrapper{width:100%;max-width:none;margin:0 auto;box-sizing:border-box;}`,
+    `#content-area{width:580px;display:block;float:none;margin:0 auto;}`,
   ];
 
-  /*
-   * SmartEditor 3.x 이상:
-   * 글별 post-view ID는 매번 달라질 수 있으므로 접두사 선택자를 사용한다.
-   */
-  if(editorVersion===3) {
+  if(editorVersion===3||editorVersion===4) {
     rules.push(`#post-area .bcc>[id^="post-view"].wrap_rabbit{width:100%;margin:auto;}`);
   }
 
@@ -337,6 +302,7 @@ function cleanRuntimeClasses($,root) {
 function cleanArchivedRoot($,root) {
   root.find("script").remove();
   root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn").remove();
+  root.find("[id^='naverComment_'][id$='_ct']").remove();
 
   root.find("style").each((_,element)=>{
     const style=$(element);
@@ -347,7 +313,6 @@ function cleanArchivedRoot($,root) {
 
   root.find("[contenteditable]").removeAttr("contenteditable");
   root.find("[draggable]").removeAttr("draggable");
-
   cleanRuntimeClasses($,root);
 }
 
@@ -374,6 +339,7 @@ async function makeHtml(rawHtml,outputDir,options={}) {
   const $=cheerio.load(rawHtml,{decodeEntities:false});
   const editorVersion=options.editorVersion??detectEditorVersion($);
   const root=getPostRoot($,editorVersion);
+
   const bodyAttributes=getBodyAttributes($);
   const inlineHeadCss=getInlineHeadCss($);
   const archiveOverrideCss=getArchiveOverrideCss(editorVersion);
@@ -405,17 +371,21 @@ async function makeHtml(rawHtml,outputDir,options={}) {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Naver Blog Post</title>
+
         ${layoutCssLink}
         ${postViewCssLink}
         ${viewerCssLink}
+
         <style>${inlineHeadCss}</style>
         <style>${archiveOverrideCss}</style>
+
         <style>
           html,body{margin:0}
           .naver-local-video video{max-width:100%;height:auto}
           .naver-local-youtube iframe{max-width:100%}
         </style>
       </head>
+
       <body${makeAttributeString(bodyAttributes)}>
         ${protectedBody.token}
       </body>
