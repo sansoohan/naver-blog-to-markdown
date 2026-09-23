@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 type PostInfo = {
@@ -10,12 +10,33 @@ type PostInfo = {
   hasMarkdown: boolean;
 };
 
+const DEFAULT_MARKDOWN_ZOOM = 80;
+const MIN_MARKDOWN_ZOOM = 50;
+const MAX_MARKDOWN_ZOOM = 150;
+const MARKDOWN_ZOOM_STEP = 5;
+
 function App() {
   const [posts, setPosts] = useState<PostInfo[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [markdownZoom, setMarkdownZoom] = useState(() => {
+    const saved = Number(localStorage.getItem("markdownZoom"));
+
+    if (
+      Number.isFinite(saved) &&
+      saved >= MIN_MARKDOWN_ZOOM &&
+      saved <= MAX_MARKDOWN_ZOOM
+    ) {
+      return saved;
+    }
+
+    return DEFAULT_MARKDOWN_ZOOM;
+  });
+
+  const markdownFrameRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +106,30 @@ function App() {
     return `/api/post/markdown?path=${encodeURIComponent(post.relativePath)}&refresh=${refreshKey}`;
   };
 
+  const changeMarkdownZoom = (amount: number) => {
+    setMarkdownZoom(current => {
+      const next = Math.min(
+        MAX_MARKDOWN_ZOOM,
+        Math.max(MIN_MARKDOWN_ZOOM, current + amount)
+      );
+
+      localStorage.setItem("markdownZoom", String(next));
+      return next;
+    });
+  };
+
+  const resetMarkdownZoom = () => {
+    setMarkdownZoom(DEFAULT_MARKDOWN_ZOOM);
+    localStorage.setItem("markdownZoom", String(DEFAULT_MARKDOWN_ZOOM));
+  };
+
+  useEffect(() => {
+    const document = markdownFrameRef.current?.contentDocument;
+    if (!document) return;
+
+    document.documentElement.style.zoom = `${markdownZoom}%`;
+  }, [markdownZoom, currentPost?.id, refreshKey]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -99,12 +144,16 @@ function App() {
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        goPrevious();
+
+        setCurrentIndex(index => Math.max(0, index - 1));
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        goNext();
+
+        setCurrentIndex(index =>
+          Math.min(posts.length - 1, index + 1)
+        );
       }
     };
 
@@ -128,7 +177,9 @@ function App() {
           </button>
 
           <span className="counter">
-            {posts.length === 0 ? "0 / 0" : `${currentIndex + 1} / ${posts.length}`}
+            {posts.length === 0
+              ? "0 / 0"
+              : `${currentIndex + 1} / ${posts.length}`}
           </span>
 
           <button
@@ -179,10 +230,22 @@ function App() {
         </button>
       </header>
 
-      {loading && <div className="status-message">게시글 목록을 불러오는 중...</div>}
-      {!loading && error && <div className="status-message error-message">{error}</div>}
+      {loading && (
+        <div className="status-message">
+          게시글 목록을 불러오는 중...
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="status-message error-message">
+          {error}
+        </div>
+      )}
+
       {!loading && !error && posts.length === 0 && (
-        <div className="status-message">게시글이 없습니다.</div>
+        <div className="status-message">
+          게시글이 없습니다.
+        </div>
       )}
 
       {!loading && !error && currentPost && (
@@ -192,7 +255,9 @@ function App() {
               <span>original.html</span>
 
               {!currentPost.hasHtml && (
-                <span className="missing-file">파일 없음</span>
+                <span className="missing-file">
+                  파일 없음
+                </span>
               )}
             </div>
 
@@ -205,7 +270,9 @@ function App() {
                   title="Original HTML"
                 />
               ) : (
-                <div className="empty-view">original.html이 없습니다.</div>
+                <div className="empty-view">
+                  original.html이 없습니다.
+                </div>
               )}
             </div>
           </section>
@@ -214,21 +281,84 @@ function App() {
             <div className="viewer-header">
               <span>index.md</span>
 
-              {!currentPost.hasMarkdown && (
-                <span className="missing-file">파일 없음</span>
-              )}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  marginLeft: "auto",
+                }}
+              >
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() =>
+                    changeMarkdownZoom(-MARKDOWN_ZOOM_STEP)
+                  }
+                  disabled={markdownZoom <= MIN_MARKDOWN_ZOOM}
+                  title="축소"
+                >
+                  −
+                </button>
+
+                <span
+                  style={{
+                    minWidth: "42px",
+                    textAlign: "center",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {markdownZoom}%
+                </span>
+
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() =>
+                    changeMarkdownZoom(MARKDOWN_ZOOM_STEP)
+                  }
+                  disabled={markdownZoom >= MAX_MARKDOWN_ZOOM}
+                  title="확대"
+                >
+                  +
+                </button>
+
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={resetMarkdownZoom}
+                  disabled={markdownZoom === DEFAULT_MARKDOWN_ZOOM}
+                >
+                  초기화
+                </button>
+
+                {!currentPost.hasMarkdown && (
+                  <span className="missing-file">
+                    파일 없음
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="viewer-body">
               {currentPost.hasMarkdown ? (
                 <iframe
+                  ref={markdownFrameRef}
                   key={`${currentPost.id}-markdown-${refreshKey}`}
                   className="viewer-frame"
                   src={getMarkdownUrl(currentPost)}
                   title="Markdown"
+                  onLoad={event => {
+                    const document =
+                      event.currentTarget.contentDocument;
+
+                    if (!document) return;
+
+                    document.documentElement.style.zoom =
+                      `${markdownZoom}%`;
+                  }}
                 />
               ) : (
-                <div className="empty-view">index.md가 없습니다.</div>
+                <div className="empty-view">
+                  index.md가 없습니다.
+                </div>
               )}
             </div>
           </section>
