@@ -32,9 +32,17 @@ npm run blog -- "https://blog.naver.com/[네이버ID]"                          
 npm run page -- "https://blog.naver.com/[네이버ID]/[포스팅번호]" --private       # 단일 글
 npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --private # 카테고리 전체 글
 npm run blog -- "https://blog.naver.com/[네이버ID]" --private                  # 모든 글
+
+# 수정된 글만 다시 백업
+npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --update  # 업데이트된 카테고리 전체 글
+npm run blog -- "https://blog.naver.com/[네이버ID]" --update                   # 업데이트된 모든 글
+
+# 
 ```
 
 처음 `--private` 실행 시 Chromium 창에서 직접 로그인합니다. 로그인 정보는 `.auth/naver-storage-state.json`에 저장되며, 유효한 동안 다음 실행에서는 재로그인하지 않습니다. 네이버 인증 정보를 초기화하거나 다른 계정으로 다시 로그인하기 위해서는 `.auth/` 폴더를 삭제해야 합니다.
+
+`--update`는 기존에 백업된 글도 실제로 변경되었는지 확인해야 하므로, 글이 많을 경우 확인하는 데 시간이 어느 정도 걸릴 수 있습니다. 변경되지 않은 글은 다시 백업하지 않습니다.
 
 ## 출력 폴더 구조
 
