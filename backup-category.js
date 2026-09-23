@@ -1,11 +1,25 @@
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
 const {checkBackupCache} = require("./src/backup-cache");
-const {parseBlogUrl, getCategoryList, getCategoryPathParts, formatCategory, getAllPosts, getCategoryPosts, getLeafCategories, getPostCategories} = require("./src/category");
+const {
+  parseBlogUrl,
+  getCategoryList,
+  getCategoryPathParts,
+  formatCategory,
+  getAllPosts,
+  getAllCategoryPosts,
+  getCategoryPosts,
+  getLeafCategories,
+  getPostCategories,
+} = require("./src/category");
 
 function ask(question) {
   const rl = readline.createInterface({input: process.stdin, output: process.stdout});
-  return new Promise(resolve => rl.question(question, answer => { rl.close(); resolve(answer.trim()); }));
+
+  return new Promise(resolve => rl.question(question, answer => {
+    rl.close();
+    resolve(answer.trim());
+  }));
 }
 
 async function selectCategory(categories, inputName = "") {
@@ -17,10 +31,17 @@ async function selectCategory(categories, inputName = "") {
 
   if (exactMatches.length > 1) {
     console.log(`\n'${name}' 카테고리가 여러 개 있습니다.\n`);
-    exactMatches.forEach((category, index) => console.log(`${index + 1}. ${formatCategory(category, categories)}`));
+
+    exactMatches.forEach((category, index) => {
+      console.log(`${index + 1}. ${formatCategory(category, categories)}`);
+    });
 
     const index = Number(await ask("\n선택: ")) - 1;
-    if (!Number.isInteger(index) || index < 0 || index >= exactMatches.length) throw new Error("올바른 번호를 선택해주세요.");
+
+    if (!Number.isInteger(index) || index < 0 || index >= exactMatches.length) {
+      throw new Error("올바른 번호를 선택해주세요.");
+    }
+
     return exactMatches[index];
   }
 
@@ -28,10 +49,16 @@ async function selectCategory(categories, inputName = "") {
   if (!partialMatches.length) throw new Error(`'${name}' 카테고리를 찾을 수 없습니다.`);
 
   console.log(`\n'${name}'이 포함된 카테고리:\n`);
-  partialMatches.forEach((category, index) => console.log(`${index + 1}. ${formatCategory(category, categories)}`));
+
+  partialMatches.forEach((category, index) => {
+    console.log(`${index + 1}. ${formatCategory(category, categories)}`);
+  });
 
   const index = Number(await ask("\n선택: ")) - 1;
-  if (!Number.isInteger(index) || index < 0 || index >= partialMatches.length) throw new Error("올바른 번호를 선택해주세요.");
+
+  if (!Number.isInteger(index) || index < 0 || index >= partialMatches.length) {
+    throw new Error("올바른 번호를 선택해주세요.");
+  }
 
   return partialMatches[index];
 }
@@ -41,7 +68,15 @@ async function backupPosts(blogId, posts, options = {}) {
 
   if (!posts.length) {
     console.log("백업할 게시글이 없습니다.");
-    return {total: 0, created: 0, updated: 0, skipped: 0, failed: 0, updatedPosts: []};
+
+    return {
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      updatedPosts: [],
+    };
   }
 
   const cache = checkBackupCache();
@@ -71,14 +106,22 @@ async function backupPosts(blogId, posts, options = {}) {
     }
 
     try {
-      const result = await convertPost(blogId, post.logNo, {skipUnchanged: update, categoryPath: post.categoryPath, title: post.title, includePrivate});
+      const result = await convertPost(blogId, post.logNo, {
+        skipUnchanged: update,
+        categoryPath: post.categoryPath,
+        title: post.title,
+        includePrivate,
+      });
 
-      if (result.status === "new") created++;
-      else if (result.status === "updated") {
+      if (result.status === "new") {
+        created++;
+      } else if (result.status === "updated") {
         updated++;
         updatedPosts.push(post);
         console.log(`업데이트됨: ${post.logNo} ${post.title}`);
-      } else if (result.status === "skipped") skipped++;
+      } else if (result.status === "skipped") {
+        skipped++;
+      }
 
       cachedPostKeys.add(cacheKey);
       cachedPostKeys.delete(legacyKey);
@@ -90,7 +133,14 @@ async function backupPosts(blogId, posts, options = {}) {
     console.log("");
   }
 
-  return {total: posts.length, created, updated, skipped, failed, updatedPosts};
+  return {
+    total: posts.length,
+    created,
+    updated,
+    skipped,
+    failed,
+    updatedPosts,
+  };
 }
 
 function printBackupSummary(label, result, options = {}) {
@@ -105,47 +155,34 @@ function printBackupSummary(label, result, options = {}) {
 
   if (result.updatedPosts.length) {
     console.log("\n업데이트된 글:");
-    for (const post of result.updatedPosts) console.log(`${post.logNo} ${post.title}`);
+
+    for (const post of result.updatedPosts) {
+      console.log(`${post.logNo} ${post.title}`);
+    }
   }
 }
 
-async function backupAllCategories(url,options={}) {
-  const {includePrivate=false,update=false}=options;
-  const {blogId}=parseBlogUrl(url);
+async function backupAllCategories(url, options = {}) {
+  const {includePrivate = false, update = false} = options;
+  const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
   console.log("카테고리 목록을 가져오는 중...");
 
-  const categories=await getCategoryList(blogId,{includePrivate});
-  const targetCategories=getPostCategories(categories);
-  const posts=[];
-  const seen=new Set();
+  const categories = await getCategoryList(blogId, {includePrivate});
+  const targetCategories = getPostCategories(categories);
 
   console.log(`확인할 카테고리: ${targetCategories.length}개`);
 
-  for(let index=0;index<targetCategories.length;index++) {
-    const category=targetCategories[index];
-    const categoryPath=getCategoryPathParts(category,categories);
-
-    console.log(`글 목록 확인 중: ${index+1}/${targetCategories.length} ${categoryPath.join(" > ")}`);
-
-    const categoryPosts=await getAllPosts(blogId,category.categoryNo,{
-      quiet:true,
-      includePrivate,
-      allowEmptyPrivateCategory:includePrivate,
-    });
-
-    for(const post of categoryPosts) {
-      if(seen.has(post.logNo)) continue;
-      seen.add(post.logNo);
-      posts.push({...post,categoryPath});
-    }
-  }
+  const posts = await getAllCategoryPosts(blogId, targetCategories, {
+    includePrivate,
+    quiet: false,
+  });
 
   console.log(`전체 글 수: ${posts.length}`);
 
-  const result=await backupPosts(blogId,posts,{includePrivate,update});
-  printBackupSummary("블로그",result,{update});
+  const result = await backupPosts(blogId, posts, {includePrivate, update});
+  printBackupSummary("블로그", result, {update});
 
   return result;
 }
@@ -167,6 +204,7 @@ async function backupCategory(url, categoryName = "", options = {}) {
   const result = await backupPosts(blogId, posts, {includePrivate, update});
 
   printBackupSummary("카테고리", result, {update});
+
   return result;
 }
 
@@ -202,6 +240,13 @@ async function main() {
   }
 }
 
-module.exports = {backupCategory, backupAllCategories, parseBlogUrl, getCategoryList, getAllPosts, getCategoryPathParts};
+module.exports = {
+  backupCategory,
+  backupAllCategories,
+  parseBlogUrl,
+  getCategoryList,
+  getAllPosts,
+  getCategoryPathParts,
+};
 
 if (require.main === module) main();
