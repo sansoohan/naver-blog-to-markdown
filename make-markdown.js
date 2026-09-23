@@ -252,6 +252,7 @@ function escapeHtmlAttribute(value) {
 
 function removeArchiveOnlyElements(root) {
   root.find("script, style").remove();
+  root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn").remove();
 }
 
 function isForeignFormattedBlock($, element) {

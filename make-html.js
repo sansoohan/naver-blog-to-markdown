@@ -336,7 +336,7 @@ function cleanRuntimeClasses($,root) {
 
 function cleanArchivedRoot($,root) {
   root.find("script").remove();
-  root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn.post_btn2").remove();
+  root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn").remove();
 
   root.find("style").each((_,element)=>{
     const style=$(element);
