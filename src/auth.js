@@ -5,6 +5,7 @@ const {chromium}=require("playwright");
 const AUTH_DIR=path.join(process.cwd(),".auth");
 const PROFILE_DIR=path.join(AUTH_DIR,"naver-profile");
 const AUTH_STATE_FILE=path.join(AUTH_DIR,"naver-storage-state.json");
+
 const NAVER_URL="https://www.naver.com/";
 const LOGIN_URL="https://nid.naver.com/nidlogin.login";
 const LOGIN_TIMEOUT=10*60*1000;
@@ -77,6 +78,7 @@ async function launchBrowser() {
   }
 
   page=await context.newPage();
+
   await setupWindowControl();
 
   return context;
@@ -89,6 +91,7 @@ async function setupWindowControl() {
     cdpSession=await context.newCDPSession(page);
 
     const result=await cdpSession.send("Browser.getWindowForTarget");
+
     windowId=result.windowId;
   } catch {
     cdpSession=null;
@@ -156,6 +159,12 @@ async function saveAuthState() {
   } catch {}
 }
 
+function deleteSavedAuthState() {
+  try {
+    fs.unlinkSync(AUTH_STATE_FILE);
+  } catch {}
+}
+
 async function isDeviceRegistrationPromptVisible() {
   if(!context) return false;
 
@@ -205,8 +214,15 @@ async function waitForDeviceRegistrationChoice(startedAt) {
   throw new Error("이 기기 등록 선택 시간이 초과되었습니다.");
 }
 
+/*
+ * 기존 로그인 흐름에서 사용하는 함수.
+ *
+ * 원래 코드의 동작을 그대로 유지한다.
+ * 쿠키가 있으면 로그인 상태로 판단하고 페이지를 이동시키지 않는다.
+ */
 async function verifyNaverLogin() {
   if(!page||page.isClosed()) return false;
+
   if(await hasLoginCookie()) return true;
 
   try {
@@ -225,12 +241,17 @@ async function verifyNaverLogin() {
   }
 }
 
+/*
+ * 기존 로그인 완료 후 블로그 소유자 권한 확인.
+ *
+ * 원래 코드의 흐름을 그대로 유지한다.
+ */
 async function verifyBlogOwner(blogId) {
   if(!page||page.isClosed()||!blogId) return false;
+
   if(!await verifyNaverLogin()) return false;
 
-  const writeUrl="https://blog.naver.com/PostWriteForm.naver?blogId="
-    +encodeURIComponent(blogId);
+  const writeUrl="https://blog.naver.com/PostWriteForm.naver?blogId="+encodeURIComponent(blogId);
 
   try {
     await page.goto(writeUrl,{waitUntil:"domcontentloaded",timeout:60000});
@@ -239,6 +260,7 @@ async function verifyBlogOwner(blogId) {
     const html=await page.content();
 
     if(isLoginUrl(finalUrl)) return false;
+
     if(/로그인이 필요|로그인 후 이용|권한이 없|접근 권한/i.test(html)) return false;
 
     return finalUrl.includes("PostWriteForm.naver")||/글쓰기|publish|editor/i.test(html);
@@ -251,6 +273,62 @@ async function verifyAuth(blogId="") {
   return blogId?verifyBlogOwner(blogId):verifyNaverLogin();
 }
 
+/*
+ * 저장된 세션을 처음 불러왔을 때만 사용하는 검사.
+ *
+ * blogId가 있으면 PostWriteForm을 직접 요청한다.
+ * 여기서는 hasLoginCookie()만으로 성공 처리하지 않는다.
+ *
+ * 이 함수는 waitForLogin()에서는 절대 호출하지 않는다.
+ */
+async function verifySavedAuth(blogId="") {
+  if(!page||page.isClosed()) return false;
+
+  if(blogId) {
+    const writeUrl="https://blog.naver.com/PostWriteForm.naver?blogId="+encodeURIComponent(blogId);
+
+    try {
+      await page.goto(writeUrl,{waitUntil:"domcontentloaded",timeout:60000});
+
+      const finalUrl=page.url();
+      const html=await page.content();
+
+      if(isLoginUrl(finalUrl)) return false;
+
+      if(/로그인이 필요|로그인 후 이용|권한이 없|접근 권한/i.test(html)) return false;
+
+      const owner=finalUrl.includes("PostWriteForm.naver")||/글쓰기|publish|editor/i.test(html);
+
+      if(owner) await saveAuthState();
+
+      return owner;
+    } catch {
+      return false;
+    }
+  }
+
+  /*
+   * blogId 없이 ensureLogin()을 호출한 경우에만 사용한다.
+   */
+  try {
+    await page.goto(NAVER_URL,{waitUntil:"domcontentloaded",timeout:60000});
+
+    if(isLoginUrl(page.url())) return false;
+
+    const logoutLink=await page.locator('a[href*="nidlogin.logout"]').count().catch(()=>0);
+    const loggedIn=logoutLink>0||await hasLoginCookie();
+
+    if(loggedIn) await saveAuthState();
+
+    return loggedIn;
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * 여기부터는 처음 사용하던 로그인 흐름을 그대로 유지한다.
+ */
 async function waitForLogin(blogId="") {
   console.log("브라우저에서 네이버에 로그인해주세요.");
 
@@ -294,6 +372,7 @@ async function waitForLogin(blogId="") {
 
       await showBrowser();
       await page.goto(LOGIN_URL,{waitUntil:"domcontentloaded",timeout:60000});
+
       continue;
     }
 
@@ -302,6 +381,7 @@ async function waitForLogin(blogId="") {
     console.log("네이버 로그인 정보 저장 완료");
 
     await minimizeBrowser();
+
     return;
   }
 
@@ -327,18 +407,23 @@ async function ensureLogin(blogId="") {
 
     console.log(`${label}을 확인합니다...`);
 
-    if(await verifyAuth(blogId)) {
+    /*
+     * 변경된 부분.
+     *
+     * 저장된 세션에 대해서만 별도의 서버 검증을 한다.
+     * waitForLogin()의 기존 로그인 흐름에는 영향을 주지 않는다.
+     */
+    if(await verifySavedAuth(blogId)) {
       console.log("저장된 네이버 로그인 세션을 사용합니다.");
 
       await minimizeBrowser();
+
       return;
     }
 
     console.log("저장된 네이버 로그인 세션이 만료되었거나 블로그 관리 권한이 없습니다.");
 
-    try {
-      fs.unlinkSync(AUTH_STATE_FILE);
-    } catch {}
+    deleteSavedAuthState();
   }
 
   console.log("네이버 로그인이 필요합니다.");
@@ -368,6 +453,7 @@ async function getAuthPage() {
 
   if(page.isClosed()) {
     page=await context.newPage();
+
     await setupWindowControl();
   }
 
