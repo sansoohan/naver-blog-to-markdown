@@ -84,18 +84,43 @@ async function getPost(blogId, logNo, options = {}) {
 function createContentHash(root) {
   const clone = root.clone();
 
-  clone.find(".se-component.se-file a.se-file-save-button").removeAttr("href").removeAttr("data-linkdata");
-  clone.find(".se-component.se-file script.__se_module_data").removeAttr("data-module").removeAttr("data-module-v2");
-  clone.find("pzp-pc-layout._naverVideo").removeAttr("key");
+  clone.find("*").each((_, element) => {
+    const $el = clone.find(element);
+    const attrs = element.attribs || {};
 
-  clone.find("a.videoplayer_popup_link").each((_, element) => {
-    const link = clone.find(element);
-    const href = link.attr("href");
-
-    if (href) link.attr("href", href.replace(/([?&]hashKey=)[^&"]*/i, "$1"));
+    for (const name of Object.keys(attrs)) {
+      if (name === "id") $el.removeAttr(name);
+      else if (name.startsWith("data-")) {
+        if (name === "data-linktype") continue;
+        $el.removeAttr(name);
+      }
+    }
   });
 
-  return crypto.createHash("sha256").update(clone.html() || "").digest("hex");
+  clone.find("script, style").remove();
+
+  clone.find("a").each((_, element) => {
+    const $el = clone.find(element);
+    const href = $el.attr("href");
+    if (!href) return;
+
+    try {
+      const url = new URL(href, "https://blog.naver.com");
+
+      for (const key of [...url.searchParams.keys()]) {
+        if (/^(hashKey|timestamp|ts|t|rnd|random|nonce)$/i.test(key)) url.searchParams.delete(key);
+      }
+
+      $el.attr("href", url.toString());
+    } catch {}
+  });
+
+  const html = clone.html()
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return crypto.createHash("sha256").update(html).digest("hex");
 }
 
 function loadCache() {

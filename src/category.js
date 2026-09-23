@@ -1,7 +1,7 @@
 const cheerio = require("cheerio");
 const {fetchNaver} = require("./naver-request");
 
-const POST_LIST_COUNT = 80;
+const POST_LIST_COUNT = 30;
 const POST_LIST_MIN_INTERVAL = 50;
 const POST_LIST_MAX_INTERVAL = 2000;
 const postListStates = new Map();
@@ -161,14 +161,12 @@ function parseCategoriesFromHtml(html) {
 
     if (!name) return;
 
-    const countText = item.find(".num").first().text().trim();
-    const postCount = countText ? Number(countText.replace(/[^\d]/g, "")) || 0 : null;
     const className = item.attr("class") || "";
     const parentMatch = className.match(/parentcategoryno_(\d+)/i);
     const parentCategoryNo = parentMatch && parentMatch[1] !== "0" ? parentMatch[1] : null;
 
     seen.add(categoryNo);
-    categories.push({categoryNo, name, postCount, parentCategoryNo});
+    categories.push({categoryNo, name, parentCategoryNo});
   });
 
   return categories;
@@ -258,8 +256,7 @@ function getCategoryPath(category, categories) {
 }
 
 function formatCategory(category, categories) {
-  const postCount = category.postCount === null ? "?" : category.postCount;
-  return `${getCategoryPath(category, categories)} (${postCount}개)`;
+  return getCategoryPath(category, categories);
 }
 
 async function getPrivatePostList(blogId, categoryNo, pageNumber) {
@@ -379,6 +376,7 @@ async function getPostListWithRetry(blogId, categoryNo, page, options = {}) {
 async function getAllPosts(blogId, categoryNo, options = {}) {
   const {quiet = false, includePrivate = false, allowEmptyPrivateCategory = false} = options;
   const posts = [];
+  const seen = new Set();
   let page = 1;
   let totalCount = null;
 
@@ -387,36 +385,73 @@ async function getAllPosts(blogId, categoryNo, options = {}) {
       includePrivate,
       allowEmptyPrivateCategory,
     });
+
     const postList = Array.isArray(data.postList) ? data.postList : [];
 
     if (totalCount === null) {
-      totalCount = Number(data.totalCount) || 0;
+      const parsedTotalCount = Number(data.totalCount);
+      totalCount = Number.isFinite(parsedTotalCount) && parsedTotalCount >= 0
+        ? parsedTotalCount
+        : null;
 
-      if (!quiet) {
+      if (!quiet && totalCount !== null) {
         console.log("");
         console.log(`게시글 ${totalCount}개를 찾았습니다.`);
         console.log("");
       }
     }
 
+    if (!postList.length) break;
+
+    let added = 0;
+
     for (const post of postList) {
       if (!post.logNo) continue;
 
+      const logNo = String(post.logNo);
+      if (seen.has(logNo)) continue;
+
+      seen.add(logNo);
+      added++;
+
       posts.push({
-        logNo: String(post.logNo),
+        logNo,
         title: decodeTitle(post.title || post.filteredEncodedTitle || ""),
       });
     }
 
-    if (!postList.length || posts.length >= totalCount) break;
+    /*
+     * PostTitleListAsync가 알려준 전체 개수만큼 고유 logNo를
+     * 확보했으면 다음 중복 페이지를 요청할 필요가 없다.
+     */
+    if (totalCount !== null && posts.length >= totalCount) break;
+
+    /*
+     * totalCount가 없거나 응답이 이상한 경우를 위한 안전장치.
+     * 새로운 logNo가 하나도 없으면 반복 페이지로 보고 종료한다.
+     */
+    if (!added) {
+      if (!quiet) {
+        console.warn(`새 게시글이 없는 페이지가 나와 목록 검색을 종료합니다. (page=${page})`);
+      }
+      break;
+    }
 
     page++;
+  }
+
+  if (!quiet && totalCount !== null && posts.length !== totalCount) {
+    console.warn(`게시글 수 불일치: API ${totalCount}개 / 실제 수집 ${posts.length}개`);
   }
 
   return posts;
 }
 
-function getDescendantLeafCategories(category, categories) {
+function getChildren(category, categories) {
+  return categories.filter(item => item.parentCategoryNo === category.categoryNo);
+}
+
+function getDescendantCategories(category, categories) {
   const result = [];
   const visited = new Set();
 
@@ -425,74 +460,112 @@ function getDescendantLeafCategories(category, categories) {
 
     visited.add(current.categoryNo);
 
-    const children = categories.filter(item => item.parentCategoryNo === current.categoryNo);
-
-    if (!children.length) {
-      result.push(current);
-      return;
+    for (const child of getChildren(current, categories)) {
+      result.push(child);
+      visit(child);
     }
-
-    for (const child of children) visit(child);
   }
 
   visit(category);
   return result;
 }
 
+function getDescendantLeafCategories(category, categories) {
+  return getDescendantCategories(category, categories)
+    .filter(item => !getChildren(item, categories).length);
+}
+
+async function collectCategoryPostLists(blogId, targetCategories, options = {}) {
+  const {includePrivate = false} = options;
+  const result = new Map();
+
+  for (const category of targetCategories) {
+    const categoryPath = getCategoryPathParts(
+      category,
+      targetCategories.length ? options.allCategories : []
+    );
+
+    const pathText = categoryPath.length
+      ? categoryPath.join(" > ")
+      : category.name;
+
+    console.log(pathText);
+
+    const posts = await getAllPosts(blogId, category.categoryNo, {
+      quiet: true,
+      includePrivate,
+      allowEmptyPrivateCategory: includePrivate,
+    });
+
+    result.set(category.categoryNo, posts);
+
+    console.log(`조회 결과 ${posts.length}개`);
+    console.log("");
+  }
+
+  return result;
+}
+
+function getDirectPosts(category, categories, postLists) {
+  const ownPosts = postLists.get(category.categoryNo) || [];
+  const descendants = getDescendantCategories(category, categories);
+
+  if (!descendants.length) return ownPosts;
+
+  const descendantPostNos = new Set();
+
+  for (const descendant of descendants) {
+    const posts = postLists.get(descendant.categoryNo) || [];
+
+    for (const post of posts) {
+      descendantPostNos.add(post.logNo);
+    }
+  }
+
+  return ownPosts.filter(post => !descendantPostNos.has(post.logNo));
+}
+
 async function getCategoryPosts(blogId, category, categories, options = {}) {
   const {includePrivate = false} = options;
-  const children = categories.filter(item => item.parentCategoryNo === category.categoryNo);
 
-  if (!children.length) {
-    if (category.postCount === 0) {
-      console.log("게시글이 없거나 구분용인 카테고리입니다.");
-      return [];
-    }
-
-    const categoryPath = getCategoryPathParts(category, categories);
-    const posts = await getAllPosts(blogId, category.categoryNo, {includePrivate});
-
-    return posts.map(post => ({...post, categoryPath}));
-  }
-
-  const leafCategories = getDescendantLeafCategories(category, categories);
-  const targetCategories = leafCategories.filter(category => category.postCount !== 0);
-  const skippedCategoryCount = leafCategories.length - targetCategories.length;
+  const descendants = getDescendantCategories(category, categories);
+  const targetCategories = [category, ...descendants];
 
   console.log("");
-  console.log(`확인할 하위 카테고리 ${targetCategories.length}개를 찾았습니다.`);
-
-  if (skippedCategoryCount) {
-    console.log(`게시글이 없는 것으로 확인된 하위 카테고리 ${skippedCategoryCount}개는 건너뜁니다.`);
-  }
-
+  console.log(`확인할 카테고리 ${targetCategories.length}개를 찾았습니다.`);
   console.log("");
+
+  const postLists = new Map();
+
+  for (const targetCategory of targetCategories) {
+    const categoryPath = getCategoryPathParts(targetCategory, categories);
+
+    console.log(categoryPath.join(" > "));
+
+    const categoryPosts = await getAllPosts(blogId, targetCategory.categoryNo, {
+      quiet: true,
+      includePrivate,
+      allowEmptyPrivateCategory: includePrivate,
+    });
+
+    postLists.set(targetCategory.categoryNo, categoryPosts);
+
+    console.log(`조회 결과 ${categoryPosts.length}개`);
+    console.log("");
+  }
 
   const posts = [];
   const seen = new Set();
 
   for (const targetCategory of targetCategories) {
     const categoryPath = getCategoryPathParts(targetCategory, categories);
-    const postCount = targetCategory.postCount === null ? "?" : targetCategory.postCount;
+    const directPosts = getDirectPosts(targetCategory, categories, postLists);
 
-    console.log(`${categoryPath.join(" > ")} (${postCount}개)`);
-
-    const categoryPosts = await getAllPosts(blogId, targetCategory.categoryNo, {
-      quiet: true,
-      includePrivate,
-      allowEmptyPrivateCategory: includePrivate && targetCategory.postCount === null,
-    });
-
-    if (!categoryPosts.length) {
-      console.log("게시글 없음");
-      console.log("");
-      continue;
+    if (directPosts.length) {
+      console.log(`${categoryPath.join(" > ")}: 직접 속한 게시글 ${directPosts.length}개`);
     }
 
-    console.log(`게시글 ${categoryPosts.length}개`);
-    console.log("");
-
-    for (const post of categoryPosts) {
+    for (const post of directPosts) {
       if (seen.has(post.logNo)) continue;
 
       seen.add(post.logNo);
@@ -500,6 +573,7 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
     }
   }
 
+  console.log("");
   console.log(`게시글 ${posts.length}개를 찾았습니다.`);
   console.log("");
 
@@ -507,11 +581,13 @@ async function getCategoryPosts(blogId, category, categories, options = {}) {
 }
 
 function getLeafCategories(categories) {
-  return categories.filter(category => !categories.some(item => item.parentCategoryNo === category.categoryNo));
+  return categories.filter(
+    category => !categories.some(item => item.parentCategoryNo === category.categoryNo)
+  );
 }
 
 function getPostCategories(categories) {
-  return getLeafCategories(categories).filter(category => category.postCount > 0);
+  return getLeafCategories(categories);
 }
 
 module.exports = {
