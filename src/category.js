@@ -345,8 +345,8 @@ async function getPostListWithRetry(blogId, categoryNo, page, options = {}) {
       lastError = error;
       const message = String(error?.message || error);
 
-      if (allowEmptyPrivateCategory && includePrivate && page === 1 && isEmptyPrivateCategoryError(error)) {
-        return {postList: [], totalCount: 0};
+      if(allowEmptyPrivateCategory && includePrivate && page===1 && isEmptyPrivateCategoryError(error)) {
+        return {postList:[],totalCount:0};
       }
 
       if (!isTemporaryPostListError(error) || attempt === maxAttempts) throw error;

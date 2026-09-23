@@ -109,43 +109,43 @@ function printBackupSummary(label, result, options = {}) {
   }
 }
 
-async function backupAllCategories(url, options = {}) {
-  const {includePrivate = false, update = false} = options;
-  const {blogId} = parseBlogUrl(url);
+async function backupAllCategories(url,options={}) {
+  const {includePrivate=false,update=false}=options;
+  const {blogId}=parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
   console.log("카테고리 목록을 가져오는 중...");
 
-  const categories = await getCategoryList(blogId, {includePrivate});
-  const leafCategories = getLeafCategories(categories);
-  const targetCategories = includePrivate ? leafCategories.filter(category => category.postCount !== 0) : getPostCategories(categories);
-  const skippedCategoryCount = leafCategories.length - targetCategories.length;
-  const posts = [];
-  const seen = new Set();
+  const categories=await getCategoryList(blogId,{includePrivate});
+  const targetCategories=getPostCategories(categories);
+  const posts=[];
+  const seen=new Set();
 
   console.log(`확인할 카테고리: ${targetCategories.length}개`);
-  if (skippedCategoryCount) console.log(`게시글이 없는 것으로 확인된 카테고리: ${skippedCategoryCount}개 (건너뜀)`);
 
-  for (let index = 0; index < targetCategories.length; index++) {
-    const category = targetCategories[index];
-    const categoryPath = getCategoryPathParts(category, categories);
-    const postCount = category.postCount === null ? "?" : category.postCount;
+  for(let index=0;index<targetCategories.length;index++) {
+    const category=targetCategories[index];
+    const categoryPath=getCategoryPathParts(category,categories);
 
-    console.log(`글 목록 확인 중: ${index + 1}/${targetCategories.length} ${categoryPath.join(" > ")} (${postCount}개)`);
+    console.log(`글 목록 확인 중: ${index+1}/${targetCategories.length} ${categoryPath.join(" > ")}`);
 
-    const categoryPosts = await getAllPosts(blogId, category.categoryNo, {quiet: true, includePrivate, allowEmptyPrivateCategory: includePrivate && category.postCount === null});
+    const categoryPosts=await getAllPosts(blogId,category.categoryNo,{
+      quiet:true,
+      includePrivate,
+      allowEmptyPrivateCategory:includePrivate,
+    });
 
-    for (const post of categoryPosts) {
-      if (seen.has(post.logNo)) continue;
+    for(const post of categoryPosts) {
+      if(seen.has(post.logNo)) continue;
       seen.add(post.logNo);
-      posts.push({...post, categoryPath});
+      posts.push({...post,categoryPath});
     }
   }
 
   console.log(`전체 글 수: ${posts.length}`);
 
-  const result = await backupPosts(blogId, posts, {includePrivate, update});
-  printBackupSummary("블로그", result, {update});
+  const result=await backupPosts(blogId,posts,{includePrivate,update});
+  printBackupSummary("블로그",result,{update});
 
   return result;
 }
