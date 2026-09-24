@@ -262,7 +262,9 @@ function protectOgCards($, root, store) {
     const imageSrc = component.find("img").first().attr("src") || "";
     const parts = [];
 
-    if (imageSrc) parts.push(`<img src="${escapeHtmlAttribute(imageSrc)}" style="max-width:120px;height:auto;">`);
+    if (imageSrc) {
+      parts.push(`<img src="${escapeHtmlAttribute(imageSrc)}" width="120">`);
+    }
 
     const text = [
       title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
@@ -272,8 +274,11 @@ function protectOgCards($, root, store) {
 
     parts.push(`<a href="${escapeHtmlAttribute(href)}">${text}</a>`);
 
-    const html = `<div class="naver-og-card">${parts.join("")}</div>`;
-    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+    const html = `<div style="display:flex;gap:12px;align-items:center;">${parts.join("")}</div>`;
+
+    component.replaceWith(
+      `<div class="naver-protected">${store.add(html)}</div>`
+    );
   }
 }
 
