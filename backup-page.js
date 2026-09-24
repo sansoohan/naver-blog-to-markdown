@@ -111,8 +111,9 @@ function createContentHash(root) {
   });
 
   const html = clone.html().replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim();
+  const hash = crypto.createHash("sha256").update(html).digest("hex");
 
-  return crypto.createHash("sha256").update(html).digest("hex");
+  return {hash, source: html};
 }
 
 function removeDirectory(directory) {
@@ -234,7 +235,7 @@ async function convertPost(blogId, logNo, options = {}) {
   const $ = cheerio.load(rawHtml, {decodeEntities: false});
   const root = getPostRoot($);
   const editorVersion = detectEditorVersion($);
-  const contentHash = createContentHash(root);
+  const {hash: contentHash, source: hashSource} = createContentHash(root);
 
   console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
 
@@ -347,6 +348,11 @@ async function convertPost(blogId, logNo, options = {}) {
       noDownload,
       previousHtml,
     });
+
+    const hashSourceFilename = `.hash-source-${contentHash.slice(0, 16)}.html`;
+    const hashSourcePath = path.join(tempOutputDir, hashSourceFilename);
+
+    if (!fs.existsSync(hashSourcePath)) fs.writeFileSync(hashSourcePath, hashSource, "utf8");
 
     fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
 
