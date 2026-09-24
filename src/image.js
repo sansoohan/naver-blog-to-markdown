@@ -220,6 +220,12 @@ function getImageSource(image) {
   return getImageSources(image)[0] || "";
 }
 
+function getImageWidth(image) {
+  const width = Number(image.attr("data-width") || image.attr("width"));
+
+  return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
 function applyLocalizedImage(image, filename) {
   image.attr("src", `./${filename}`);
   image.removeAttr("data-lazy-src");
@@ -228,12 +234,32 @@ function applyLocalizedImage(image, filename) {
   image.removeAttr("data-src");
   image.removeAttr("srcset");
 
-  const width = Number(image.attr("data-width") || image.attr("width"));
+  const width = getImageWidth(image);
 
-  if (Number.isFinite(width) && width > 0) {
+  if (width) {
     image.attr("style", `width:${width}px;max-width:100%;height:auto;`);
   } else if (!image.attr("style")) {
     image.attr("style", "max-width:100%;height:auto;");
+  }
+}
+
+function replaceWithMissingImage(image) {
+  const module = image.closest(".se-module.se-module-image");
+  const width = getImageWidth(image);
+  const style = width ? `width:${width}px;max-width:100%;` : "";
+
+  const html = [
+    `<div class="se-state-error " style="${style}">`,
+    '<div class="se-state-error-detail">',
+    '<div class="se-state-error-text">존재하지 않는 이미지입니다.</div>',
+    "</div>",
+    "</div>",
+  ].join("");
+
+  if (module.length) {
+    module.attr("style", "").empty().append(html);
+  } else {
+    image.replaceWith(html);
   }
 }
 
@@ -420,7 +446,7 @@ function createImageManager(outputDir, managerOptions = {}) {
     const {
       highResolution = false,
       fallbackPrefix = "image",
-      timeout = 10000,
+      timeout = 1000,
       noDownload = defaultNoDownload,
       previousFilename = "",
     } = options;
@@ -474,7 +500,6 @@ function createImageManager(outputDir, managerOptions = {}) {
         fallbackFilename: filename,
         noDownload,
         timeout,
-        retries: 1,
         logLabel: "이미지",
         headers: {
           "User-Agent": "Mozilla/5.0",
@@ -592,10 +617,14 @@ async function localizeImages($, root, imageManager, options = {}) {
       console.warn(`이미지 다운로드 실패: ${sources.join(", ")}`);
       console.warn(error.message);
 
+      if (!isOgImage) replaceWithMissingImage(image);
       continue;
     }
 
-    if (!downloaded.filename) continue;
+    if (!downloaded.filename) {
+      if (!isOgImage) replaceWithMissingImage(image);
+      continue;
+    }
 
     applyLocalizedImage(image, downloaded.filename);
   }

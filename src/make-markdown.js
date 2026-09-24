@@ -168,6 +168,41 @@ function escapeMarkdownAlt(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
 }
 
+function protectMissingImages($, root, store) {
+  const components = root.find(".se-component.se-image").toArray();
+
+  for (const element of components) {
+    const component = $(element);
+    const error = component.find(".se-state-error").first();
+
+    if (!error.length) continue;
+
+    /*
+     * 누락된 이미지의 원래 표시 폭은 img나 se-state-error가 아니라
+     * .se-section-image의 max-width에 남아 있다.
+     */
+    const section = component.find(".se-section-image").first();
+    const style = section.attr("style") || "";
+    const match = style.match(/max-width\s*:\s*(\d+(?:\.\d+)?)px/i);
+
+    const width = match
+      ? Math.round(Number(match[1]))
+      : 580;
+
+    const height = Math.round(width * 0.56);
+
+    const html =
+      `<div style="width:${width}px;height:${height}px;max-width:100%;background:#fff;`
+      + `border:1px solid #ddd;box-sizing:border-box;`
+      + `display:flex;align-items:center;justify-content:center;color:#ccc;">`
+      + "존재하지 않는 이미지입니다.</div>";
+
+    component.replaceWith(
+      `<div class="naver-protected">${store.add(html)}</div>`
+    );
+  }
+}
+
 function protectImages($, root, store) {
   const components = root.find(".se-component.se-image").toArray();
 
@@ -327,6 +362,7 @@ function makeMarkdown(originalHtml, options = {}) {
   protectNaverVideos($, root, store);
   protectYouTube($, root, store);
   protectOgCards($, root, store);
+  protectMissingImages($, root, store);
   protectImages($, root, store);
   protectTables($, root, store);
   protectQuotes($, root, store);
