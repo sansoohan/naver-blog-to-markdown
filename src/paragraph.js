@@ -433,7 +433,69 @@ function renderParagraphHtml(node) {
   return `${escapeHtmlText(`${checkbox.indent}- [${checkbox.checked}] `)}${content}`;
 }
 
+function renderTextList($, list, depth = 0) {
+  const lines = [];
+  const tagName = String(list[0]?.tagName || list[0]?.name || "").toLowerCase();
+  const ordered = tagName === "ol";
+  const items = list.children("li").toArray();
+
+  for (let index = 0; index < items.length; index++) {
+    const item = $(items[index]);
+    const paragraphs = item.children("p.se-text-paragraph").toArray();
+    const indent = "  ".repeat(depth);
+    const marker = ordered ? `${index + 1}.` : "-";
+
+    const contents = paragraphs.map((paragraph) => {
+      const rendered = renderParagraph(paragraph);
+      return rendered.empty ? "" : rendered.text;
+    }).filter(Boolean);
+
+    const content = contents.join("<br>");
+    lines.push(`${indent}${marker}${content ? ` ${content}` : ""}`);
+
+    const childLists = item.children("ul.se-text-list,ol.se-text-list").toArray();
+
+    for (const childList of childLists) {
+      const nested = renderTextList($, $(childList), depth + 1);
+      if (nested) lines.push(nested);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function protectTextLists($, root, store) {
+  const lists = root.find("ul.se-text-list,ol.se-text-list").toArray();
+
+  for (const element of lists) {
+    const list = $(element);
+
+    if (!list.parent().length) continue;
+    if (list.parents("ul.se-text-list,ol.se-text-list").length) continue;
+
+    const markdown = renderTextList($, list);
+    if (!markdown) continue;
+
+    /*
+     * protectTextComponents()가 .se-component.se-text 내부의 p만 순서대로
+     * 수집하므로 목록을 먼저 placeholder 문단으로 바꿔 둔다.
+     *
+     * 이후 renderParagraph()가 placeholder 문자열을 그대로 통과시키고,
+     * 최종 store.restore()에서 실제 Markdown 목록으로 복구된다.
+     */
+    const token = store.add(markdown);
+    list.replaceWith(`<p class="se-text-paragraph">${token}</p>`);
+  }
+}
+
 function protectTextComponents($, root, store) {
+  /*
+   * 네이버 SmartEditor의 목록은 일반 문단과 같은 .se-component.se-text 안에
+   * <ul>/<li> 구조로 들어간다. 기존처럼 p만 수집하면 목록 구조가 사라지므로
+   * 문단 처리 전에 목록을 Markdown으로 보호한다.
+   */
+  protectTextLists($, root, store);
+
   root.find(".se-component.se-text").each((_, element) => {
     const component = $(element);
     const paragraphs = component.find("p.se-text-paragraph").toArray();
