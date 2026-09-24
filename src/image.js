@@ -1,24 +1,25 @@
-const fs=require("fs");
-const path=require("path");
+const fs = require("fs");
+const path = require("path");
+const {downloadFirst, getFilenameFromUrl, getUniqueFilename} = require("./downloader");
 
 function decodeLegacyEucKr(value) {
-  const source=String(value||"");
-  const bytes=[];
+  const source = String(value || "");
+  const bytes = [];
 
-  for(let index=0;index<source.length;index++) {
-    if(source[index]==="%"&&/^[0-9a-f]{2}$/i.test(source.slice(index+1,index+3))) {
-      bytes.push(parseInt(source.slice(index+1,index+3),16));
-      index+=2;
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] === "%" && /^[0-9a-f]{2}$/i.test(source.slice(index + 1, index + 3))) {
+      bytes.push(parseInt(source.slice(index + 1, index + 3), 16));
+      index += 2;
     } else {
       bytes.push(source.charCodeAt(index));
     }
   }
 
-  return new TextDecoder("euc-kr",{fatal:true}).decode(Buffer.from(bytes));
+  return new TextDecoder("euc-kr", {fatal: true}).decode(Buffer.from(bytes));
 }
 
 function decodeFilename(value) {
-  const source=String(value||"");
+  const source = String(value || "");
 
   try {
     return decodeURIComponent(source);
@@ -27,442 +28,580 @@ function decodeFilename(value) {
   return decodeLegacyEucKr(source);
 }
 
-function safeFilename(value,fallback) {
+function safeFilename(value, fallback) {
   let filename;
 
   try {
-    filename=decodeFilename(value);
+    filename = decodeFilename(value);
   } catch {
     return fallback;
   }
 
-  filename=filename
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g,"_")
-    .replace(/[. ]+$/g,"")
+  filename = filename
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/[. ]+$/g, "")
     .trim();
 
-  return filename||fallback;
+  return filename || fallback;
 }
 
-function getFilenameFromUrl(url,fallback) {
-  try {
-    const filename=path.posix.basename(new URL(url).pathname);
-
-    return safeFilename(filename,fallback);
-  } catch {
-    return fallback;
-  }
-}
-
-function getUniqueFilename(outputDir,filename) {
-  const ext=path.extname(filename);
-  const base=path.basename(filename,ext);
-  let result=filename;
-  let index=2;
-
-  while(fs.existsSync(path.join(outputDir,result))) {
-    result=`${base}_${index}${ext}`;
-    index++;
-  }
-
-  return result;
-}
-
-function getExtensionFromContentType(contentType,fallback=".jpg") {
-  if(/image\/jpeg/i.test(contentType)) return ".jpg";
-  if(/image\/png/i.test(contentType)) return ".png";
-  if(/image\/gif/i.test(contentType)) return ".gif";
-  if(/image\/webp/i.test(contentType)) return ".webp";
-  if(/image\/bmp/i.test(contentType)) return ".bmp";
-  if(/image\/svg\+xml/i.test(contentType)) return ".svg";
-  if(/image\/avif/i.test(contentType)) return ".avif";
+function getExtensionFromContentType(contentType, fallback = ".jpg") {
+  if (/image\/jpeg/i.test(contentType)) return ".jpg";
+  if (/image\/png/i.test(contentType)) return ".png";
+  if (/image\/gif/i.test(contentType)) return ".gif";
+  if (/image\/webp/i.test(contentType)) return ".webp";
+  if (/image\/bmp/i.test(contentType)) return ".bmp";
+  if (/image\/svg\+xml/i.test(contentType)) return ".svg";
+  if (/image\/avif/i.test(contentType)) return ".avif";
 
   return fallback;
 }
 
-function getExtensionFromBuffer(buffer,contentType="",fallback=".jpg") {
-  if(!buffer||buffer.length<4) {
-    return getExtensionFromContentType(contentType,fallback);
-  }
+function getExtensionFromBuffer(buffer, contentType = "", fallback = ".jpg") {
+  if (!buffer || buffer.length < 4) return getExtensionFromContentType(contentType, fallback);
 
-  const hex=buffer.subarray(0,16).toString("hex");
-  const ascii=buffer.subarray(0,16).toString("ascii");
+  const hex = buffer.subarray(0, 16).toString("hex");
+  const ascii = buffer.subarray(0, 16).toString("ascii");
 
-  if(hex.startsWith("ffd8ff")) return ".jpg";
-  if(hex.startsWith("89504e470d0a1a0a")) return ".png";
-  if(ascii.startsWith("GIF87a")||ascii.startsWith("GIF89a")) return ".gif";
-  if(ascii.startsWith("BM")) return ".bmp";
+  if (hex.startsWith("ffd8ff")) return ".jpg";
+  if (hex.startsWith("89504e470d0a1a0a")) return ".png";
+  if (ascii.startsWith("GIF87a") || ascii.startsWith("GIF89a")) return ".gif";
+  if (ascii.startsWith("BM")) return ".bmp";
 
-  if(ascii.startsWith("RIFF")&&buffer.subarray(8,12).toString("ascii")==="WEBP") {
-    return ".webp";
-  }
+  if (ascii.startsWith("RIFF") && buffer.subarray(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buffer.subarray(4, 12).toString("ascii").includes("ftypavif")) return ".avif";
 
-  if(buffer.subarray(4,12).toString("ascii").includes("ftypavif")) {
-    return ".avif";
-  }
+  const beginning = buffer.subarray(0, 512).toString("utf8").trimStart();
 
-  const beginning=buffer.subarray(0,512).toString("utf8").trimStart();
-
-  if(beginning.startsWith("<svg")||beginning.startsWith("<?xml")&&beginning.includes("<svg")) {
+  if (beginning.startsWith("<svg") || (beginning.startsWith("<?xml") && beginning.includes("<svg"))) {
     return ".svg";
   }
 
-  return getExtensionFromContentType(contentType,fallback);
+  return getExtensionFromContentType(contentType, fallback);
 }
 
-function isImageBuffer(buffer,contentType="") {
-  if(!buffer||buffer.length<4) return false;
-
-  return Boolean(getExtensionFromBuffer(buffer,contentType,""));
+function isImageBuffer(buffer, contentType = "") {
+  if (!buffer || buffer.length < 4) return false;
+  return Boolean(getExtensionFromBuffer(buffer, contentType, ""));
 }
 
 function normalizeInputUrl(url) {
-  return String(url||"").trim().replace(/&amp;/g,"&");
+  return String(url || "").trim().replace(/&amp;/g, "&");
 }
 
 function removeWrappingQuotes(value) {
-  return String(value||"").trim().replace(/^["']+|["']+$/g,"");
+  return String(value || "").trim().replace(/^["']+|["']+$/g, "");
 }
 
-function addUniqueCandidate(candidates,value) {
-  const candidate=normalizeInputUrl(value);
-
-  if(!candidate||candidates.includes(candidate)) return;
-
+function addUniqueCandidate(candidates, value) {
+  const candidate = normalizeInputUrl(value);
+  if (!candidate || candidates.includes(candidate)) return;
   candidates.push(candidate);
 }
 
-function addProtocolCandidates(candidates,value) {
+function addProtocolCandidates(candidates, value) {
   try {
-    const parsed=new URL(value.startsWith("//")?`https:${value}`:value);
+    const parsed = new URL(value.startsWith("//") ? `https:${value}` : value);
 
-    if(parsed.protocol==="http:") {
-      const httpsUrl=new URL(parsed);
-      httpsUrl.protocol="https:";
-      addUniqueCandidate(candidates,httpsUrl.toString());
-    } else if(parsed.protocol==="https:") {
-      const httpUrl=new URL(parsed);
-      httpUrl.protocol="http:";
-      addUniqueCandidate(candidates,httpUrl.toString());
+    if (parsed.protocol === "http:") {
+      const httpsUrl = new URL(parsed);
+      httpsUrl.protocol = "https:";
+      addUniqueCandidate(candidates, httpsUrl.toString());
+    } else if (parsed.protocol === "https:") {
+      const httpUrl = new URL(parsed);
+      httpUrl.protocol = "http:";
+      addUniqueCandidate(candidates, httpUrl.toString());
     }
   } catch {}
 }
 
-function addNestedImageCandidates(candidates,parsed) {
-  const parameterNames=[
-    "src",
-    "url",
-    "image",
-    "imageUrl",
-    "img",
-    "original",
-    "originalUrl",
-  ];
+function addNestedImageCandidates(candidates, parsed) {
+  const parameterNames = ["src", "url", "image", "imageUrl", "img", "original", "originalUrl"];
 
-  for(const parameterName of parameterNames) {
-    const value=parsed.searchParams.get(parameterName);
+  for (const parameterName of parameterNames) {
+    const value = parsed.searchParams.get(parameterName);
+    if (!value) continue;
 
-    if(!value) continue;
+    const nestedUrl = removeWrappingQuotes(value);
 
-    const nestedUrl=removeWrappingQuotes(value);
+    if (!/^https?:\/\//i.test(nestedUrl) && !nestedUrl.startsWith("//")) continue;
 
-    if(!/^https?:\/\//i.test(nestedUrl)&&!nestedUrl.startsWith("//")) continue;
-
-    addUniqueCandidate(candidates,nestedUrl);
-    addProtocolCandidates(candidates,nestedUrl);
+    addUniqueCandidate(candidates, nestedUrl);
+    addProtocolCandidates(candidates, nestedUrl);
   }
 }
 
-function addHighResolutionCandidate(candidates,parsed) {
-  if(!/(^|\.)pstatic\.net$/i.test(parsed.hostname)) return;
-  if(!parsed.searchParams.has("type")) return;
+function addHighResolutionCandidate(candidates, parsed) {
+  if (!/(^|\.)pstatic\.net$/i.test(parsed.hostname)) return;
+  if (!parsed.searchParams.has("type")) return;
 
-  /*
-   * 원래 URL을 먼저 시도한다.
-   * 고해상도 type은 원본이 실패했을 때만 사용하는 대체 후보이다.
-   */
-  const highResolutionUrl=new URL(parsed);
-  highResolutionUrl.searchParams.set("type","w2000");
+  const highResolutionUrl = new URL(parsed);
+  highResolutionUrl.searchParams.set("type", "w2000");
 
-  addUniqueCandidate(candidates,highResolutionUrl.toString());
+  addUniqueCandidate(candidates, highResolutionUrl.toString());
 }
 
-function getImageCandidates(url,options={}) {
-  const {highResolution=false}=options;
-  const source=normalizeInputUrl(url);
-  const candidates=[];
+function getImageCandidates(url, options = {}) {
+  const {highResolution = false} = options;
+  const source = normalizeInputUrl(url);
+  const candidates = [];
 
-  if(!source) return candidates;
+  if (!source) return candidates;
 
-  if(
+  if (
     source.startsWith("./")
-    ||source.startsWith("../")
-    ||source.startsWith("data:")
-    ||source.startsWith("blob:")
+    || source.startsWith("../")
+    || source.startsWith("data:")
+    || source.startsWith("blob:")
   ) {
-    addUniqueCandidate(candidates,source);
+    addUniqueCandidate(candidates, source);
     return candidates;
   }
 
-  addUniqueCandidate(candidates,source);
+  addUniqueCandidate(candidates, source);
 
   try {
-    const parsed=new URL(source.startsWith("//")?`https:${source}`:source);
+    const parsed = new URL(source.startsWith("//") ? `https:${source}` : source);
 
-    addNestedImageCandidates(candidates,parsed);
-
-    if(highResolution) addHighResolutionCandidate(candidates,parsed);
-
-    addProtocolCandidates(candidates,parsed.toString());
+    addNestedImageCandidates(candidates, parsed);
+    if (highResolution) addHighResolutionCandidate(candidates, parsed);
+    addProtocolCandidates(candidates, parsed.toString());
   } catch {}
 
   return candidates;
 }
 
-async function fetchImageCandidate(url,timeout=1000) {
-  const response=await fetch(url,{
-    headers:{
-      "User-Agent":"Mozilla/5.0",
-      Referer:"https://blog.naver.com/",
-      Accept:"image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-    },
-    redirect:"follow",
-    signal:AbortSignal.timeout(timeout),
-  });
-
-  if(!response.ok) throw new Error(`HTTP ${response.status}`);
-
-  const contentType=response.headers.get("content-type")||"";
-  const buffer=Buffer.from(await response.arrayBuffer());
-
-  if(!buffer.length) throw new Error("빈 응답");
-
-  if(!isImageBuffer(buffer,contentType)) {
-    throw new Error(`이미지가 아닌 응답: ${contentType||"unknown"}`);
-  }
-
-  return {
-    url,
-    buffer,
-    contentType,
-  };
-}
-
-async function fetchFirstAvailableImage(candidates,options={}) {
-  const {timeout=1000}=options;
-  const failures=[];
-
-  for(const candidate of candidates) {
-    try {
-      return await fetchImageCandidate(candidate,timeout);
-    } catch(error) {
-      failures.push(`${candidate} → ${error.message}`);
-    }
-  }
-
-  const message=failures.length
-    ?`모든 이미지 주소 실패:\n${failures.join("\n")}`
-    :"사용 가능한 이미지 주소가 없음";
-
-  throw new Error(message);
-}
-
 function getNestedFilenameUrl(url) {
   try {
-    const parsed=new URL(normalizeInputUrl(url));
-    const parameterNames=["src","url","image","imageUrl","img","original","originalUrl"];
+    const parsed = new URL(normalizeInputUrl(url));
+    const parameterNames = ["src", "url", "image", "imageUrl", "img", "original", "originalUrl"];
 
-    for(const parameterName of parameterNames) {
-      const value=parsed.searchParams.get(parameterName);
+    for (const parameterName of parameterNames) {
+      const value = parsed.searchParams.get(parameterName);
+      if (!value) continue;
 
-      if(!value) continue;
+      const nestedUrl = removeWrappingQuotes(value);
 
-      const nestedUrl=removeWrappingQuotes(value);
-
-      if(/^https?:\/\//i.test(nestedUrl)||nestedUrl.startsWith("//")) return nestedUrl;
+      if (/^https?:\/\//i.test(nestedUrl) || nestedUrl.startsWith("//")) return nestedUrl;
     }
   } catch {}
 
   return "";
 }
 
-function getFilenameSource(originalUrl,successfulUrl) {
-  const successfulFilename=getFilenameFromUrl(successfulUrl,"");
+function getFilenameSource(originalUrl, successfulUrl) {
+  const successfulFilename = getFilenameFromUrl(successfulUrl, "");
+  if (successfulFilename) return successfulUrl;
 
-  if(successfulFilename) return successfulUrl;
-
-  const nestedUrl=getNestedFilenameUrl(originalUrl);
-
-  return nestedUrl||successfulUrl||originalUrl;
-}
-
-function ensureImageExtension(filename,buffer,contentType) {
-  if(path.extname(filename)) return filename;
-
-  return `${filename}${getExtensionFromBuffer(buffer,contentType)}`;
-}
-
-function createImageManager(outputDir) {
-  const cache=new Map();
-  let fallbackIndex=0;
-
-  async function download(url,options={}) {
-    const {
-      highResolution=false,
-      fallbackPrefix="image",
-      timeout=1000,
-    }=options;
-
-    if(!url) return "";
-
-    if(url.startsWith("./")) return url.slice(2);
-
-    const candidates=getImageCandidates(url,{highResolution});
-
-    if(
-      !candidates.length
-      ||candidates[0].startsWith("data:")
-      ||candidates[0].startsWith("blob:")
-    ) {
-      return "";
-    }
-
-    const cacheKey=JSON.stringify(candidates);
-
-    if(cache.has(cacheKey)) return cache.get(cacheKey);
-
-    const downloaded=await fetchFirstAvailableImage(candidates,{timeout});
-
-    fallbackIndex++;
-
-    const fallback=`${fallbackPrefix}-${String(fallbackIndex).padStart(3,"0")}`;
-    const filenameSource=getFilenameSource(url,downloaded.url);
-    let filename=getFilenameFromUrl(filenameSource,fallback);
-
-    filename=ensureImageExtension(filename,downloaded.buffer,downloaded.contentType);
-    filename=getUniqueFilename(outputDir,filename);
-
-    fs.writeFileSync(path.join(outputDir,filename),downloaded.buffer);
-
-    cache.set(cacheKey,filename);
-
-    return filename;
-  }
-
-  return {
-    download,
-  };
+  const nestedUrl = getNestedFilenameUrl(originalUrl);
+  return nestedUrl || successfulUrl || originalUrl;
 }
 
 function getImageSources(image) {
-  const sources=[];
-  const attributes=[
-    "data-lazy-src",
-    "data-original",
-    "data-origin-src",
-    "data-src",
-    "src",
-  ];
+  const sources = [];
+  const attributes = ["data-lazy-src", "data-original", "data-origin-src", "data-src", "src"];
 
-  for(const attribute of attributes) {
-    const value=image.attr(attribute);
-
-    if(value&&!sources.includes(value)) sources.push(value);
+  for (const attribute of attributes) {
+    const value = image.attr(attribute);
+    if (value && !sources.includes(value)) sources.push(value);
   }
 
-  const srcset=image.attr("srcset")||"";
+  const srcset = image.attr("srcset") || "";
 
-  for(const entry of srcset.split(",")) {
-    const value=entry.trim().split(/\s+/)[0];
-
-    if(value&&!sources.includes(value)) sources.push(value);
+  for (const entry of srcset.split(",")) {
+    const value = entry.trim().split(/\s+/)[0];
+    if (value && !sources.includes(value)) sources.push(value);
   }
 
   return sources;
 }
 
 function getImageSource(image) {
-  return getImageSources(image)[0]||"";
+  return getImageSources(image)[0] || "";
 }
 
-async function downloadFromImageSources(imageManager,sources,options) {
-  const failures=[];
+function applyLocalizedImage(image, filename) {
+  image.attr("src", `./${filename}`);
+  image.removeAttr("data-lazy-src");
+  image.removeAttr("data-original");
+  image.removeAttr("data-origin-src");
+  image.removeAttr("data-src");
+  image.removeAttr("srcset");
 
-  for(const source of sources) {
-    if(
+  const width = Number(image.attr("data-width") || image.attr("width"));
+
+  if (Number.isFinite(width) && width > 0) {
+    image.attr("style", `width:${width}px;max-width:100%;height:auto;`);
+  } else if (!image.attr("style")) {
+    image.attr("style", "max-width:100%;height:auto;");
+  }
+}
+
+function isCacheMissError(error) {
+  const message = String(error?.message || error || "");
+  if (!message) return false;
+
+  const lines = message.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const resultLines = lines.filter(line => line.includes("->"));
+
+  if (!resultLines.length) return message.includes("--no-download 이미지 캐시 없음:");
+
+  return resultLines.every(line => line.includes("--no-download 이미지 캐시 없음:"));
+}
+
+function getExistingFile(outputDir, filename) {
+  if (!outputDir || !filename) return "";
+
+  const root = path.resolve(outputDir);
+  const localPath = path.resolve(root, filename);
+
+  if (localPath !== root && !localPath.startsWith(`${root}${path.sep}`)) return "";
+
+  try {
+    if (!fs.statSync(localPath).isFile()) return "";
+  } catch {
+    return "";
+  }
+
+  return filename;
+}
+
+function getExistingFilenameCandidates(filename) {
+  const candidates = [];
+
+  function add(value) {
+    if (!value || candidates.includes(value)) return;
+    candidates.push(value);
+  }
+
+  add(filename);
+
+  const ext = path.extname(filename);
+
+  if (!ext) {
+    add(`${filename}.jpg`);
+    add(`${filename}.jpeg`);
+    add(`${filename}.png`);
+    add(`${filename}.webp`);
+    add(`${filename}.gif`);
+    add(`${filename}.bmp`);
+    add(`${filename}.svg`);
+    add(`${filename}.avif`);
+  }
+
+  if (ext.toLowerCase() === ".img") {
+    const base = path.basename(filename, ext);
+
+    add(`${base}.jpg`);
+    add(`${base}.jpeg`);
+    add(`${base}.png`);
+    add(`${base}.webp`);
+    add(`${base}.gif`);
+    add(`${base}.bmp`);
+    add(`${base}.svg`);
+    add(`${base}.avif`);
+  }
+
+  return candidates;
+}
+
+function getExistingImageFilename(outputDir, originalUrl, candidates, fallback) {
+  const filenameUrls = [];
+
+  function addFilenameUrl(value) {
+    const source = normalizeInputUrl(value);
+    if (!source || filenameUrls.includes(source)) return;
+    filenameUrls.push(source);
+  }
+
+  const nestedUrl = getNestedFilenameUrl(originalUrl);
+
+  addFilenameUrl(originalUrl);
+  addFilenameUrl(nestedUrl);
+
+  for (const candidate of candidates) addFilenameUrl(candidate);
+
+  for (const source of filenameUrls) {
+    const rawFilename = getFilenameFromUrl(source, "");
+    if (!rawFilename) continue;
+
+    const filename = safeFilename(rawFilename, fallback);
+    if (!filename) continue;
+
+    for (const candidateFilename of getExistingFilenameCandidates(filename)) {
+      const existingFilename = getExistingFile(outputDir, candidateFilename);
+
+      if (existingFilename) return existingFilename;
+    }
+  }
+
+  return "";
+}
+
+function getLocalImageFilename(image) {
+  if (!image || !image.length) return "";
+
+  const source = String(image.attr("src") || "").trim();
+
+  if (!source.startsWith("./") || source.startsWith("../")) return "";
+
+  let filename = source.slice(2).split(/[?#]/)[0];
+
+  try {
+    filename = decodeURIComponent(filename);
+  } catch {}
+
+  filename = filename.replace(/\//g, path.sep);
+
+  if (!filename || path.isAbsolute(filename)) return "";
+  if (filename.split(path.sep).includes("..")) return "";
+
+  return filename;
+}
+
+function getComponentInfo($, image, root) {
+  const component = image.closest(".se-component");
+  if (!component.length) return null;
+
+  const componentElement = component.get(0);
+  const components = root.find(".se-component").add(root.filter(".se-component")).toArray();
+  const componentIndex = components.indexOf(componentElement);
+
+  if (componentIndex < 0) return null;
+
+  const componentImages = component.find("img").filter((index, element) => {
+    return !$(element).closest(".se-component.se-video").length;
+  }).toArray();
+
+  const imageIndex = componentImages.indexOf(image.get(0));
+  if (imageIndex < 0) return null;
+
+  return {
+    componentIndex,
+    imageIndex,
+  };
+}
+
+function findPreviousImageByComponent($, image, root, previous$, previousRoot, outputDir) {
+  if (!previous$ || !previousRoot) return "";
+
+  const info = getComponentInfo($, image, root);
+  if (!info) return "";
+
+  const previousComponents = previousRoot.find(".se-component").add(previousRoot.filter(".se-component")).toArray();
+  const previousComponentElement = previousComponents[info.componentIndex];
+
+  if (!previousComponentElement) return "";
+
+  const previousComponent = previous$(previousComponentElement);
+
+  const previousImages = previousComponent.find("img").filter((index, element) => {
+    return !previous$(element).closest(".se-component.se-video").length;
+  }).toArray();
+
+  const previousImageElement = previousImages[info.imageIndex];
+  if (!previousImageElement) return "";
+
+  const previousImage = previous$(previousImageElement);
+  const filename = getLocalImageFilename(previousImage);
+
+  if (!filename) return "";
+
+  return getExistingFile(outputDir, filename);
+}
+
+function createImageManager(outputDir, managerOptions = {}) {
+  const cache = new Map();
+  let fallbackIndex = 0;
+
+  const defaultNoDownload = Boolean(managerOptions.noDownload);
+
+  async function downloadImage(url, options = {}) {
+    const {
+      highResolution = false,
+      fallbackPrefix = "image",
+      timeout = 10000,
+      noDownload = defaultNoDownload,
+      previousFilename = "",
+    } = options;
+
+    if (!url) return "";
+    if (url.startsWith("./")) return url.slice(2);
+
+    /*
+     * --no-download에서 previous original.html과 정확히 대응된 이미지가 있으면
+     * URL cache보다 먼저 그 파일을 사용한다.
+     *
+     * 같은 URL을 사용하는 여러 이미지가
+     * image.png / image_2.png / image_3.png처럼 서로 다른 파일로 저장되어 있을 수 있으므로
+     * 이 경로에서는 URL 기반 메모리 cache를 사용하거나 기록하면 안 된다.
+     */
+    if (noDownload && previousFilename) {
+      const existingPreviousFilename = getExistingFile(outputDir, previousFilename);
+
+      if (existingPreviousFilename) {
+        console.log(`이미지 기존 HTML 재사용: ${existingPreviousFilename}`);
+        return existingPreviousFilename;
+      }
+    }
+
+    const candidates = getImageCandidates(url, {highResolution});
+
+    if (!candidates.length || candidates[0].startsWith("data:") || candidates[0].startsWith("blob:")) {
+      return "";
+    }
+
+    const cacheKey = JSON.stringify(candidates);
+
+    /*
+     * previousFilename으로 처리되지 않은 일반적인 이미지에 대해서만
+     * URL 기반 메모리 cache를 사용한다.
+     */
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+    fallbackIndex++;
+
+    const fallback = `${fallbackPrefix}-${String(fallbackIndex).padStart(3, "0")}`;
+    const filenameSource = getFilenameSource(url, candidates[0]);
+
+    let filename = safeFilename(getFilenameFromUrl(filenameSource, fallback), fallback);
+    if (!path.extname(filename)) filename += ".img";
+
+    try {
+      const result = await downloadFirst(candidates, {
+        outputDir,
+        filename,
+        fallbackFilename: filename,
+        noDownload,
+        timeout,
+        retries: 1,
+        logLabel: "이미지",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Referer: "https://blog.naver.com/",
+          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        },
+        validate: async (buffer, {contentType}) => {
+          if (!isImageBuffer(buffer, contentType)) {
+            throw new Error(`이미지가 아닌 응답: ${contentType || "unknown"}`);
+          }
+        },
+        resolveFilename: ({buffer, contentType}) => {
+          if (path.extname(filename).toLowerCase() !== ".img") return filename;
+
+          const extension = getExtensionFromBuffer(buffer, contentType, ".jpg");
+          return `${path.basename(filename, ".img")}${extension}`;
+        },
+      });
+
+      cache.set(cacheKey, result.filename);
+      return result.filename;
+    } catch (error) {
+      if (!noDownload || !isCacheMissError(error)) throw error;
+
+      const existingFilename = getExistingImageFilename(outputDir, url, candidates, fallback);
+
+      if (!existingFilename) throw error;
+
+      console.log(`이미지 기존 파일 재사용: ${existingFilename}`);
+
+      cache.set(cacheKey, existingFilename);
+      return existingFilename;
+    }
+  }
+
+  return {
+    outputDir,
+    download: downloadImage,
+  };
+}
+
+async function downloadFromImageSources(imageManager, sources, options) {
+  const failures = [];
+
+  for (const source of sources) {
+    if (
       source.startsWith("./")
-      ||source.startsWith("../")
-      ||source.startsWith("data:")
-      ||source.startsWith("blob:")
+      || source.startsWith("../")
+      || source.startsWith("data:")
+      || source.startsWith("blob:")
     ) {
       continue;
     }
 
     try {
-      const filename=await imageManager.download(source,options);
-
-      if(filename) return {filename,source};
-    } catch(error) {
+      const filename = await imageManager.download(source, options);
+      if (filename) return {filename, source};
+    } catch (error) {
       failures.push(`${source} → ${error.message}`);
     }
   }
 
-  if(failures.length) throw new Error(failures.join("\n"));
+  if (failures.length) throw new Error(failures.join("\n"));
 
-  return {
-    filename:"",
-    source:"",
-  };
+  return {filename: "", source: ""};
 }
 
-async function localizeImages($,root,imageManager,options={}) {
-  const {editorVersion=0}=options;
-  const images=root.find("img").add(root.filter("img")).toArray();
+async function localizeImages($, root, imageManager, options = {}) {
+  const {
+    editorVersion = 0,
+    noDownload = false,
+    previous$ = null,
+    previousRoot = null,
+  } = options;
 
-  for(const element of images) {
-    const image=$(element);
+  const images = root.find("img").add(root.filter("img")).toArray();
 
-    if(image.closest(".se-component.se-video").length) continue;
+  for (const element of images) {
+    const image = $(element);
 
-    const sources=getImageSources(image);
+    // Naver 동영상 poster는 video.js에서 별도로 처리한다.
+    if (image.closest(".se-component.se-video").length) continue;
 
-    if(!sources.length) continue;
+    const sources = getImageSources(image);
+    if (!sources.length) continue;
 
-    const isOgImage=Boolean(image.closest(".se-oglink").length);
+    const isOgImage = Boolean(image.closest(".se-oglink").length);
+
+    let previousFilename = "";
+
+    if (noDownload && previous$ && previousRoot) {
+      previousFilename = findPreviousImageByComponent(
+        $,
+        image,
+        root,
+        previous$,
+        previousRoot,
+        imageManager.outputDir
+      );
+    }
+
     let downloaded;
 
     try {
-      downloaded=await downloadFromImageSources(imageManager,sources,{
+      downloaded = await downloadFromImageSources(imageManager, sources, {
         editorVersion,
-        highResolution:!isOgImage,
-        fallbackPrefix:isOgImage?"og-thumb":"image",
+        highResolution: !isOgImage,
+        fallbackPrefix: isOgImage ? "og-thumb" : "image",
+        noDownload,
+        previousFilename,
       });
-    } catch(error) {
+    } catch (error) {
+      if (noDownload) throw error;
+
       console.warn(`이미지 다운로드 실패: ${sources.join(", ")}`);
       console.warn(error.message);
+
       continue;
     }
 
-    if(!downloaded.filename) continue;
+    if (!downloaded.filename) continue;
 
-    const width=Number(image.attr("data-width")||image.attr("width"));
-
-    image.attr("src",`./${downloaded.filename}`);
-    image.removeAttr("data-lazy-src");
-    image.removeAttr("data-original");
-    image.removeAttr("data-origin-src");
-    image.removeAttr("data-src");
-    image.removeAttr("srcset");
-
-    if(Number.isFinite(width)&&width>0) {
-      image.attr("style",`width:${width}px;max-width:100%;height:auto;`);
-    } else if(!image.attr("style")) {
-      image.attr("style","max-width:100%;height:auto;");
-    }
+    applyLocalizedImage(image, downloaded.filename);
   }
 }
 
-module.exports={
+module.exports = {
   createImageManager,
   localizeImages,
   getImageSource,

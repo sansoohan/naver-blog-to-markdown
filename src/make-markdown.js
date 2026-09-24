@@ -1,13 +1,13 @@
 const cheerio = require("cheerio");
 const TurndownService = require("turndown");
 
-const { protectTextComponents } = require("./src/paragraph");
-const { protectTables } = require("./src/table");
-const { protectQuotes } = require("./src/quote");
-const { protectHorizontalLines, getHorizontalLineCss } = require("./src/horizontal-line");
-const { protectCodeBlocks } = require("./src/code");
-const { protectAttachments } = require("./src/attachment");
-const { protectYouTube, protectNaverVideos } = require("./src/video");
+const { protectTextComponents } = require("./paragraph");
+const { protectTables } = require("./table");
+const { protectQuotes } = require("./quote");
+const { protectHorizontalLines, getHorizontalLineCss } = require("./horizontal-line");
+const { protectCodeBlocks } = require("./code");
+const { protectAttachments } = require("./attachment");
+const { protectYouTube, protectNaverVideos } = require("./video");
 
 function createStore() {
   let index = 0;

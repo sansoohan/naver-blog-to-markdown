@@ -1,85 +1,378 @@
 const fs = require("fs");
 const path = require("path");
 const cheerio = require("cheerio");
+const {downloadNaverVideo, setNaverVideoPoster} = require("./downloader");
 
-function safeFilename(value, fallback) {
-  let filename;
+function normalizeUrl(url) {
+  return String(url || "").trim().replace(/&amp;/g, "&");
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+
+  return "";
+}
+
+function parseJson(value) {
+  if (!value || typeof value !== "string") return null;
 
   try {
-    filename = decodeURIComponent(String(value));
+    return JSON.parse(value);
   } catch {
-    filename = String(value);
-  }
-
-  filename = filename
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-    .replace(/[. ]+$/g, "")
-    .trim();
-
-  return filename || fallback;
-}
-
-function getFilenameFromUrl(url, fallback) {
-  try {
-    const filename = path.posix.basename(new URL(url).pathname);
-    return safeFilename(filename, fallback);
-  } catch {
-    return fallback;
+    return null;
   }
 }
 
-function getUniqueFilename(outputDir, filename) {
-  const ext = path.extname(filename);
-  const base = path.basename(filename, ext);
+function getObjectValue(object, keys) {
+  if (!object || typeof object !== "object") return "";
 
-  let result = filename;
-  let index = 2;
+  for (const key of keys) {
+    const value = object[key];
 
-  while (fs.existsSync(path.join(outputDir, result))) {
-    result = `${base}_${index}${ext}`;
-    index++;
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
   }
 
-  return result;
+  return "";
 }
 
-async function downloadFile(url, outputPath) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://blog.naver.com/",
-    },
+function findObjectValue(object, keys, depth = 0) {
+  if (!object || typeof object !== "object" || depth > 8) return "";
+
+  const direct = getObjectValue(object, keys);
+  if (direct) return direct;
+
+  for (const value of Object.values(object)) {
+    if (!value || typeof value !== "object") continue;
+
+    const found = findObjectValue(value, keys, depth + 1);
+    if (found) return found;
+  }
+
+  return "";
+}
+
+function getAttributeValue(element, names) {
+  for (const name of names) {
+    const value = element.attr(name);
+
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+
+  return "";
+}
+
+function getDataJsonObjects(element) {
+  const objects = [];
+
+  for (const [name, value] of Object.entries(element.attr() || {})) {
+    if (!name.startsWith("data-") || typeof value !== "string") continue;
+
+    const parsed = parseJson(value);
+    if (parsed && typeof parsed === "object") objects.push(parsed);
+  }
+
+  return objects;
+}
+
+function getNaverVideoMetadata(element) {
+  const objects = getDataJsonObjects(element);
+
+  let vid = getAttributeValue(element, ["data-vid", "data-video-id", "data-videoid", "data-vod-id", "data-vodid"]);
+  let inKey = getAttributeValue(element, ["data-inkey", "data-in-key", "data-video-key", "data-videokey"]);
+  let thumbnail = getAttributeValue(element, ["data-thumbnail", "data-thumbnail-url", "data-poster", "data-poster-url"]);
+  let width = getAttributeValue(element, ["data-width", "width"]);
+  let height = getAttributeValue(element, ["data-height", "height"]);
+
+  for (const object of objects) {
+    if (!vid) vid = findObjectValue(object, ["vid", "videoId", "video_id", "vodId", "vod_id"]);
+    if (!inKey) inKey = findObjectValue(object, ["inKey", "inkey", "in_key", "videoKey", "video_key"]);
+
+    if (!thumbnail) {
+      thumbnail = findObjectValue(object, [
+        "thumbnail", "thumbnailUrl", "thumbnail_url", "poster", "posterUrl", "poster_url",
+      ]);
+    }
+
+    if (!width) width = findObjectValue(object, ["width", "videoWidth", "video_width"]);
+    if (!height) height = findObjectValue(object, ["height", "videoHeight", "video_height"]);
+  }
+
+  return {
+    vid: String(vid || "").trim(),
+    inKey: String(inKey || "").trim(),
+    thumbnail: normalizeUrl(thumbnail),
+    width: Number(width || 0),
+    height: Number(height || 0),
+  };
+}
+
+function collectNaverVideoMetadata($, component) {
+  const candidates = [];
+  const seen = new Set();
+
+  function add(element) {
+    const metadata = getNaverVideoMetadata(element);
+    if (!metadata.vid) return;
+
+    const key = `${metadata.vid}\n${metadata.inKey}`;
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    candidates.push(metadata);
+  }
+
+  add(component);
+
+  component.find("*").each((_, element) => {
+    const child = $(element);
+    const attrs = child.attr() || {};
+
+    const hasVideoData = Object.keys(attrs).some(name =>
+      /vid|video|vod|inkey|in-key|thumbnail|poster|data-module/i.test(name)
+    );
+
+    if (hasVideoData) add(child);
   });
 
-  if (!response.ok) {
-    throw new Error(`다운로드 실패: ${response.status} ${url}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  fs.writeFileSync(outputPath, buffer);
+  return candidates;
 }
 
-function parseModuleData(raw) {
-  if (!raw) {
+function findThumbnailInComponent($, component) {
+  const images = component.find("img").toArray();
+
+  for (const element of images) {
+    const image = $(element);
+
+    const source = firstNonEmpty(
+      image.attr("data-lazy-src"),
+      image.attr("data-original"),
+      image.attr("data-origin-src"),
+      image.attr("data-src"),
+      image.attr("src")
+    );
+
+    if (source) return normalizeUrl(source);
+  }
+
+  return "";
+}
+
+function enrichVideoCandidates($, component, candidates) {
+  const thumbnail = findThumbnailInComponent($, component);
+
+  return candidates.map(candidate => ({...candidate, thumbnail: candidate.thumbnail || thumbnail}));
+}
+
+function createLocalVideoHtml(videoFilename, posterFilename) {
+  const attributes = ["controls", 'preload="metadata"', `src="./${videoFilename}"`];
+
+  if (posterFilename) attributes.push(`poster="./${posterFilename}"`);
+
+  attributes.push('style="display:block;width:100%;height:auto;"');
+
+  return `<video ${attributes.join(" ")}></video>`;
+}
+
+function replaceNaverVideoComponent($, component, result, posterFilename = "") {
+  let target = component.closest(".se-module.se-module-video");
+
+  if (!target.length) target = component.find(".se-module.se-module-video").first();
+
+  if (!target.length) {
+    target = $(".se-module.se-module-video").filter((_, element) => !$(element).find("video").length).first();
+  }
+
+  if (!target.length) {
+    console.warn(`Naver 동영상 넣을 위치를 찾지 못함: ${result.vid || "unknown"}`);
+    return false;
+  }
+
+  const html = createLocalVideoHtml(result.videoFilename, posterFilename);
+
+  target.attr("style", "position:relative !important;padding-top:0 !important;").empty().append(html);
+
+  const outerComponent = target.closest(".se-component.se-video");
+
+  outerComponent.addClass("naver-local-video").attr("data-naver-video", "true").attr("data-naver-vid", result.vid);
+
+  return true;
+}
+
+function getLocalFilename(value) {
+  const source = String(value || "").trim();
+  if (!source) return "";
+
+  const withoutQuery = source.split(/[?#]/, 1)[0];
+  const normalized = withoutQuery.replace(/\\/g, "/");
+
+  return path.posix.basename(normalized);
+}
+
+function findExistingLocalFile(outputDir, value) {
+  const filename = getLocalFilename(value);
+  if (!filename) return null;
+
+  const root = path.resolve(outputDir);
+  const filePath = path.resolve(root, filename);
+
+  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) return null;
+
+  try {
+    if (!fs.statSync(filePath).isFile()) return null;
+  } catch {
     return null;
   }
 
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  return {
+    filename,
+    filePath,
+  };
+}
+
+function findPreviousNaverVideo(previous$, previousRoot, vid, outputDir) {
+  const normalizedVid = String(vid || "").trim();
+  if (!normalizedVid || !previous$ || !previousRoot?.length) return null;
+
+  const selectors = [
+    `video[data-naver-vid="${normalizedVid}"]`,
+    `[data-naver-vid="${normalizedVid}"] video`,
+    `.naver-local-video[data-naver-vid="${normalizedVid}"] video`,
+  ];
+
+  let previousVideo = previousRoot.find(selectors.join(", ")).first();
+
+  if (!previousVideo.length) {
+    previousRoot.find("video").each((_, element) => {
+      if (previousVideo.length) return;
+
+      const video = previous$(element);
+      const parent = video.closest("[data-naver-vid]");
+      const previousVid = String(video.attr("data-naver-vid") || parent.attr("data-naver-vid") || "").trim();
+
+      if (previousVid === normalizedVid) previousVideo = video;
+    });
+  }
+
+  if (!previousVideo.length) return null;
+
+  const videoSource = firstNonEmpty(previousVideo.attr("src"), previousVideo.find("source").first().attr("src"));
+  const videoFile = findExistingLocalFile(outputDir, videoSource);
+
+  if (!videoFile) return null;
+
+  const posterSource = previousVideo.attr("poster") || "";
+  const posterFile = posterSource ? findExistingLocalFile(outputDir, posterSource) : null;
+
+  return {
+    videoFilename: videoFile.filename,
+    videoPath: videoFile.filePath,
+    posterFilename: posterFile?.filename || "",
+    posterPath: posterFile?.filePath || "",
+  };
+}
+
+async function localizeNaverVideos($, root, imageManager, options = {}) {
+  const {noDownload = false, previous$ = null, previousRoot = null} = options;
+
+  const selectors = [".se-component.se-video", ".se_video", ".se-video", "[data-module*='video']"];
+  const elements = root.find(selectors.join(", ")).add(root.filter(selectors.join(", "))).toArray();
+  const components = [];
+
+  const processed = new Set();
+
+  for (const element of elements) {
+    const current = $(element);
+    const owner = current.closest(".se-component.se-video, .se_video, .se-video");
+    const component = owner.length ? owner : current;
+    const componentElement = component[0];
+
+    if (!componentElement || processed.has(componentElement)) continue;
+
+    processed.add(componentElement);
+    components.push(componentElement);
+  }
+
+  for (const element of components) {
+    const component = $(element);
+    let candidates = collectNaverVideoMetadata($, component);
+
+    if (!candidates.length) continue;
+
+    candidates = enrichVideoCandidates($, component, candidates);
+
+    let result;
+    let posterFilename = "";
+
+    if (noDownload && previous$ && previousRoot) {
+      for (const candidate of candidates) {
+        const previous = findPreviousNaverVideo(previous$, previousRoot, candidate.vid, imageManager.outputDir);
+        if (!previous) continue;
+
+        result = {
+          vid: candidate.vid,
+          videoFilename: previous.videoFilename,
+          videoPath: previous.videoPath,
+          posterFilename: previous.posterFilename,
+          posterUrl: "",
+          metadata: candidate,
+        };
+
+        posterFilename = previous.posterFilename;
+
+        console.log(`Naver 동영상 기존 파일 재사용: ${result.videoFilename}`);
+        if (posterFilename) console.log(`Naver 동영상 썸네일 기존 파일 재사용: ${posterFilename}`);
+
+        break;
+      }
+    }
+
+    if (!result) {
+      try {
+        result = await downloadNaverVideo(candidates, {
+          outputDir: imageManager.outputDir,
+          fallbackFilename: `video-${String(components.indexOf(element) + 1).padStart(3, "0")}.mp4`,
+          noDownload,
+        });
+      } catch (error) {
+        if (noDownload) throw error;
+
+        console.warn(`동영상 다운로드 실패: ${candidates[0]?.vid || "unknown"}`);
+        console.warn(error.message);
+        continue;
+      }
+
+      posterFilename = result.posterFilename || "";
+
+      if (!posterFilename && result.posterUrl && imageManager?.download) {
+        try {
+          posterFilename = await imageManager.download(result.posterUrl, {
+            fallbackPrefix: "video-thumb",
+            highResolution: true,
+            noDownload,
+          });
+        } catch (error) {
+          if (noDownload) throw error;
+
+          console.warn(`동영상 썸네일 다운로드 실패: ${result.posterUrl}`);
+          console.warn(error.message);
+        }
+      }
+    }
+
+    if (posterFilename) {
+      const posterPath = path.join(imageManager.outputDir, posterFilename);
+      setNaverVideoPoster(result.vid, result.videoPath, posterPath);
+    }
+
+    replaceNaverVideoComponent($, component, result, posterFilename);
   }
 }
 
 function parseYouTubeStart(value) {
-  if (!value) {
-    return 0;
-  }
-
-  if (/^\d+$/.test(String(value))) {
-    return Number(value);
-  }
+  if (!value) return 0;
+  if (/^\d+$/.test(String(value))) return Number(value);
 
   const text = String(value);
   let seconds = 0;
@@ -99,20 +392,18 @@ function getYouTubeId(value) {
   const text = String(value || "");
 
   let match = text.match(/youtube\.com\/watch\?.*?v=([A-Za-z0-9_-]{6,})/i);
-
-  if (match) {
-    return match[1];
-  }
+  if (match) return match[1];
 
   match = text.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/i);
-
-  if (match) {
-    return match[1];
-  }
+  if (match) return match[1];
 
   match = text.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i);
 
   return match ? match[1] : null;
+}
+
+function extractYoutubeId(value) {
+  return getYouTubeId(normalizeUrl(value)) || "";
 }
 
 function makeYouTubeIframe(id, start = 0) {
@@ -122,41 +413,33 @@ function makeYouTubeIframe(id, start = 0) {
 }
 
 function cheerioLoadFragment(html) {
-  return cheerio.load(html, { decodeEntities: false }, false);
+  return cheerio.load(html, {decodeEntities: false}, false);
 }
 
 function findYouTubeIframe($, component) {
   const existing = component.find("iframe").first();
 
-  if (existing.length && getYouTubeId(existing.attr("src"))) {
-    return $.html(existing);
-  }
+  if (existing.length && getYouTubeId(existing.attr("src"))) return $.html(existing);
 
   for (const element of component.find("script.__se_module_data").toArray()) {
     const script = $(element);
     const raws = [script.attr("data-module-v2"), script.attr("data-module"), script.html()];
 
     for (const raw of raws) {
-      if (!raw) {
-        continue;
-      }
+      if (!raw) continue;
 
-      const data = parseModuleData(raw);
+      const data = parseJson(raw);
 
       if (data) {
         const candidates = [data.html, data.data?.html, data.result?.html, data.oembed?.html];
 
         for (const candidate of candidates) {
-          if (typeof candidate !== "string") {
-            continue;
-          }
+          if (typeof candidate !== "string") continue;
 
           const fragment = cheerioLoadFragment(candidate);
           const iframe = fragment("iframe").first();
 
-          if (iframe.length && getYouTubeId(iframe.attr("src"))) {
-            return fragment.html(iframe);
-          }
+          if (iframe.length && getYouTubeId(iframe.attr("src"))) return fragment.html(iframe);
         }
 
         const serialized = JSON.stringify(data);
@@ -169,10 +452,7 @@ function findYouTubeIframe($, component) {
       }
 
       const id = getYouTubeId(raw);
-
-      if (id) {
-        return makeYouTubeIframe(id);
-      }
+      if (id) return makeYouTubeIframe(id);
     }
   }
 
@@ -180,25 +460,24 @@ function findYouTubeIframe($, component) {
 }
 
 function restoreYouTubeEmbeds($, root) {
-  const components = root.find(".se-component.se-oembed, .se-oembed").toArray();
+  const selector = ".se-component.se-oembed, .se-oembed";
+  const components = root.find(selector).add(root.filter(selector)).toArray();
+  const processed = new Set();
 
   for (const element of components) {
-    const component = $(element);
+    if (processed.has(element)) continue;
 
-    if (component.hasClass("naver-local-youtube")) {
-      continue;
-    }
+    processed.add(element);
+
+    const component = $(element);
+    if (component.hasClass("naver-local-youtube")) continue;
 
     const iframe = findYouTubeIframe($, component);
+    if (!iframe) continue;
 
-    if (!iframe) {
-      continue;
-    }
+    component.addClass("naver-local-youtube").attr("data-youtube", "true");
 
-    component.addClass("naver-local-youtube");
-    component.attr("data-youtube", "true");
-
-    const module = component.find(".se-module").first();
+    const module = component.find(".se-module.se-module-oembed").first();
 
     if (module.length) {
       module.empty().append(iframe);
@@ -208,358 +487,69 @@ function restoreYouTubeEmbeds($, root) {
   }
 }
 
-function protectYouTube($, root, store) {
-  const components = root.find(".naver-local-youtube").toArray();
-
-  for (const element of components) {
-    const component = $(element);
-    const iframe = component.find("iframe").first();
-
-    if (!iframe.length) {
-      continue;
-    }
-
-    component.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
-  }
-
-  const rawComponents = root.find(".se-component.se-oembed").toArray();
-
-  for (const element of rawComponents) {
-    const component = $(element);
-    const iframe = findYouTubeIframe($, component);
-
-    if (!iframe) {
-      continue;
-    }
-
-    component.replaceWith(`<div class="naver-protected">${store.add(iframe)}</div>`);
-  }
-}
-
-function getVideoMetadataCandidates($, component) {
-  const candidates = [];
-  const seen = new Set();
-
-  function add(metadata) {
-    if (!metadata?.vid) {
-      return;
-    }
-
-    const normalized = {
-      vid: String(metadata.vid),
-      inKey: String(metadata.inKey || metadata.inkey || metadata.in_key || ""),
-      thumbnail: String(metadata.thumbnail || ""),
-      width: Number(metadata.width || metadata.originalWidth || 0),
-      height: Number(metadata.height || metadata.originalHeight || 0),
-    };
-
-    const key = `${normalized.vid}|${normalized.inKey}`;
-
-    if (seen.has(key)) {
-      return;
-    }
-
-    seen.add(key);
-    candidates.push(normalized);
-  }
-
-  for (const element of component.find("script.__se_module_data").toArray()) {
-    const script = $(element);
-
-    for (const attr of ["data-module-v2", "data-module"]) {
-      const raw = script.attr(attr);
-      const parsed = parseModuleData(raw);
-      const data = parsed?.data;
-
-      if (!data?.vid) {
-        continue;
-      }
-
-      add({
-        vid: data.vid,
-        inKey: data.inkey || data.inKey || data.in_key || "",
-        thumbnail: data.thumbnail || "",
-        width: data.width || data.originalWidth || 0,
-        height: data.height || data.originalHeight || 0,
-      });
-    }
-  }
-
-  return candidates;
-}
-
-async function fetchVideoInfo(vid, inKey) {
-  const params = new URLSearchParams({
-    key: inKey,
-    sid: "2",
-    nonce: String(Date.now()),
-    devt: "html5_pc",
-  });
-
-  const url = `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${encodeURIComponent(vid)}?${params}`;
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://blog.naver.com/",
-      Accept: "application/json, text/plain, */*",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Naver VOD API 실패: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-function findBestMp4(data) {
-  const videos = data?.videos?.list;
-
-  if (!Array.isArray(videos) || !videos.length) {
-    return "";
-  }
-
-  const results = videos
-    .filter(video => typeof video.source === "string" && video.source.startsWith("http"))
-    .map(video => ({
-      src: video.source.replace(/∈/g, "&"),
-      size: Number(video.size || 0),
-      width: Number(video.encodingOption?.width || video.width || 0),
-      height: Number(video.encodingOption?.height || video.height || 0),
-      bitrate: Number(video.bitrate?.video || video.bitrate || 0),
-    }));
-
-  results.sort((a, b) => {
-    const resolutionDiff = (b.width * b.height) - (a.width * a.height);
-
-    if (resolutionDiff !== 0) {
-      return resolutionDiff;
-    }
-
-    if (b.bitrate !== a.bitrate) {
-      return b.bitrate - a.bitrate;
-    }
-
-    return b.size - a.size;
-  });
-
-  return results[0]?.src || "";
-}
-
-function findPoster(data) {
-  const candidates = [data?.meta?.cover?.source, data?.meta?.cover?.url, data?.thumbnail, data?.poster];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.startsWith("http")) {
-      return candidate;
-    }
-  }
-
-  let result = "";
-
-  function walk(value) {
-    if (result || !value) {
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      for (const child of value) {
-        walk(child);
-
-        if (result) {
-          return;
-        }
-      }
-
-      return;
-    }
-
-    if (typeof value !== "object") {
-      return;
-    }
-
-    for (const [key, child] of Object.entries(value)) {
-      if (typeof child === "string" && child.startsWith("http") && /thumbnail|poster|cover/i.test(key) && /\.(jpg|jpeg|png|webp)(?:\?|$)/i.test(child)) {
-        result = child;
-        return;
-      }
-
-      walk(child);
-
-      if (result) {
-        return;
-      }
-    }
-  }
-
-  walk(data);
-
-  return result;
-}
-
-async function resolveNaverVideo(candidates) {
-  let lastError = null;
-
-  for (const metadata of candidates) {
-    try {
-      console.log(`Naver 동영상 확인: ${metadata.vid} / ${metadata.inKey || "inkey 없음"}`);
-
-      const info = await fetchVideoInfo(metadata.vid, metadata.inKey);
-      const videoUrl = findBestMp4(info);
-
-      if (!videoUrl) {
-        lastError = new Error("MP4 URL을 찾지 못함");
-        continue;
-      }
-
-      return {
-        metadata,
-        info,
-        videoUrl,
-      };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return null;
-}
-
-function replaceNaverVideoPlayer($, component, videoHtml) {
-  const module = component.find(".se-module.se-module-video").first();
-
-  if (module.length) {
-    module.replaceWith(videoHtml);
-    return;
-  }
-
-  const section = component.find(".se-section.se-section-video").first();
-
-  if (section.length) {
-    section.empty().append(videoHtml);
-    return;
-  }
-
-  const content = component.find(".se-component-content").first();
-
-  if (content.length) {
-    content.empty().append(videoHtml);
-    return;
-  }
-
-  component.empty().append(videoHtml);
-}
-
-async function localizeNaverVideos($, root, outputDir, imageManager) {
-  let index = 1;
-
-  const downloadedVideos = new Map();
-  const components = root.find(".se-component.se-video").toArray();
-
-  for (const element of components) {
-    const component = $(element);
-
-    if (component.hasClass("naver-local-video")) {
-      continue;
-    }
-
-    const candidates = getVideoMetadataCandidates($, component);
-
-    if (!candidates.length) {
-      console.warn("Naver 동영상 메타데이터를 찾지 못함");
-      continue;
-    }
-
-    try {
-      const resolved = await resolveNaverVideo(candidates);
-
-      if (!resolved) {
-        continue;
-      }
-
-      const { metadata, info, videoUrl } = resolved;
-      const number = String(index).padStart(3, "0");
-
-      let videoFilename;
-
-      if (downloadedVideos.has(videoUrl)) {
-        videoFilename = downloadedVideos.get(videoUrl);
-      } else {
-        videoFilename = getFilenameFromUrl(videoUrl, `video-${number}.mp4`);
-
-        if (!path.extname(videoFilename)) {
-          videoFilename += ".mp4";
-        }
-
-        videoFilename = getUniqueFilename(outputDir, videoFilename);
-
-        console.log(`동영상 다운로드: ${videoFilename}`);
-
-        await downloadFile(videoUrl, path.join(outputDir, videoFilename));
-
-        downloadedVideos.set(videoUrl, videoFilename);
-      }
-
-      let posterFilename = "";
-      const posterUrl = findPoster(info) || metadata.thumbnail;
-
-      if (posterUrl && imageManager?.download) {
-        try {
-          posterFilename = await imageManager.download(posterUrl, {
-            fallbackPrefix: "video-thumb",
-          });
-        } catch (error) {
-          console.warn(`동영상 썸네일 다운로드 실패: ${error.message}`);
-        }
-      }
-
-      const poster = posterFilename ? ` poster="./${posterFilename}"` : "";
-      const width = metadata.width || 500;
-      const height = metadata.height || 281;
-
-      const videoHtml = `
-        <video controls preload="metadata" width="${width}" height="${height}"${poster}>
-          <source src="./${videoFilename}" type="video/mp4">
-        </video>
-      `;
-
-      component.addClass("naver-local-video");
-      component.attr("data-naver-video", "true");
-
-      replaceNaverVideoPlayer($, component, videoHtml);
-
-      console.log(`동영상 로컬화 완료: ${videoFilename} (${width}x${height})`);
-
-      index++;
-    } catch (error) {
-      console.warn(`동영상 다운로드 실패: ${candidates[0]?.vid || "unknown"} - ${error.message}`);
-    }
-  }
+function restoreYoutubeVideos($, root) {
+  restoreYouTubeEmbeds($, root);
 }
 
 function protectNaverVideos($, root, store) {
-  const videos = root.find(".naver-local-video").toArray();
+  const videos = root.find(".naver-local-video").add(root.filter(".naver-local-video")).toArray();
 
   for (const element of videos) {
     const component = $(element);
     const video = component.find("video").first();
 
-    if (!video.length) {
-      continue;
-    }
+    if (!video.length) continue;
 
     component.replaceWith(`<div class="naver-protected">${store.add($.html(video))}</div>`);
   }
 }
 
+function protectYouTube($, root, store) {
+  const components = root.find(".naver-local-youtube").add(root.filter(".naver-local-youtube")).toArray();
+
+  for (const element of components) {
+    const component = $(element);
+    const iframe = component.find("iframe").first();
+
+    if (!iframe.length) continue;
+
+    component.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+  }
+
+  const rawComponents = root.find(".se-component.se-oembed").add(root.filter(".se-component.se-oembed")).toArray();
+
+  for (const element of rawComponents) {
+    const component = $(element);
+    const iframe = findYouTubeIframe($, component);
+
+    if (!iframe) continue;
+
+    component.replaceWith(`<div class="naver-protected">${store.add(iframe)}</div>`);
+  }
+
+  const iframes = root.find("iframe").add(root.filter("iframe")).toArray();
+
+  for (const element of iframes) {
+    const iframe = $(element);
+
+    if (!getYouTubeId(iframe.attr("src"))) continue;
+
+    iframe.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+  }
+}
+
+async function localizeVideos($, root, imageManager, options = {}) {
+  await localizeNaverVideos($, root, imageManager, options);
+  restoreYouTubeEmbeds($, root);
+}
+
 module.exports = {
-  restoreYouTubeEmbeds,
-  protectYouTube,
+  localizeVideos,
   localizeNaverVideos,
+  restoreYouTubeEmbeds,
+  restoreYoutubeVideos,
+  protectYouTube,
   protectNaverVideos,
+  extractYoutubeId,
+  getNaverVideoMetadata,
 };

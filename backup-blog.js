@@ -8,11 +8,12 @@ async function main() {
   const args = process.argv.slice(2);
   const includePrivate = args.includes("--private");
   const update = args.includes("--update");
-  const positional = args.filter(arg => arg !== "--private" && arg !== "--update");
+  const noDownload = args.includes("--no-download");
+  const positional = args.filter(arg => !["--private", "--update", "--no-download"].includes(arg));
   const blogUrl = positional[0];
 
   if (!blogUrl) {
-    console.error('사용법: npm run blog -- "블로그 URL" [--private] [--update]');
+    console.error('사용법: npm run blog -- "블로그 URL" [--private] [--update] [--no-download]');
     process.exitCode = 1;
     return;
   }
@@ -23,7 +24,7 @@ async function main() {
       await ensureLogin(parseBlogUrl(blogUrl).blogId);
     }
 
-    await backupBlog(blogUrl, {includePrivate, update});
+    await backupBlog(blogUrl, {includePrivate, update, noDownload});
   } catch (error) {
     console.error(error.stack || error.message);
     process.exitCode = 1;
@@ -35,6 +36,8 @@ async function main() {
   }
 }
 
-module.exports = {backupBlog};
+module.exports = {
+  backupBlog,
+};
 
 if (require.main === module) main();

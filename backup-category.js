@@ -64,7 +64,7 @@ async function selectCategory(categories, inputName = "") {
 }
 
 async function backupPosts(blogId, posts, options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {includePrivate = false, update = false, noDownload = false} = options;
 
   if (!posts.length) {
     console.log("백업할 게시글이 없습니다.");
@@ -88,7 +88,11 @@ async function backupPosts(blogId, posts, options = {}) {
   let failed = 0;
   const updatedPosts = [];
 
-  console.log(update ? "업데이트 확인 모드로 백업을 시작합니다.\n" : "백업을 시작합니다.\n");
+  if (noDownload) {
+    console.log("리소스 재사용 모드로 백업을 시작합니다.\n");
+  } else {
+    console.log(update ? "업데이트 확인 모드로 백업을 시작합니다.\n" : "백업을 시작합니다.\n");
+  }
 
   for (let index = 0; index < posts.length; index++) {
     const post = posts[index];
@@ -99,7 +103,11 @@ async function backupPosts(blogId, posts, options = {}) {
     console.log(`[${index + 1}/${posts.length}] ${post.title || post.logNo}`);
     console.log(`카테고리: ${post.categoryPath.join(" > ")}`);
 
-    if (!update && cached) {
+    /*
+     * --no-download는 이미 백업된 글을 다시 HTML/Markdown으로 변환하기 위한 모드이므로
+     * 일반 백업처럼 캐시만 보고 건너뛰지 않는다.
+     */
+    if (!update && !noDownload && cached) {
       skipped++;
       console.log(`이미 백업됨: ${post.logNo}\n`);
       continue;
@@ -107,10 +115,12 @@ async function backupPosts(blogId, posts, options = {}) {
 
     try {
       const result = await convertPost(blogId, post.logNo, {
-        skipUnchanged: update,
+        skipUnchanged: update && !noDownload,
         categoryPath: post.categoryPath,
         title: post.title,
         includePrivate,
+        update,
+        noDownload,
       });
 
       if (result.status === "new") {
@@ -144,13 +154,19 @@ async function backupPosts(blogId, posts, options = {}) {
 }
 
 function printBackupSummary(label, result, options = {}) {
-  const {update = false} = options;
+  const {update = false, noDownload = false} = options;
 
   console.log(`${label} 백업 완료`);
   console.log(`전체: ${result.total}`);
   console.log(`신규: ${result.created}`);
   console.log(`업데이트: ${result.updated}`);
-  console.log(`${update ? "변경 없음" : "이미 백업됨"}: ${result.skipped}`);
+
+  if (noDownload) {
+    console.log(`건너뜀: ${result.skipped}`);
+  } else {
+    console.log(`${update ? "변경 없음" : "이미 백업됨"}: ${result.skipped}`);
+  }
+
   console.log(`실패: ${result.failed}`);
 
   if (result.updatedPosts.length) {
@@ -163,7 +179,7 @@ function printBackupSummary(label, result, options = {}) {
 }
 
 async function backupAllCategories(url, options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {includePrivate = false, update = false, noDownload = false} = options;
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
@@ -181,14 +197,14 @@ async function backupAllCategories(url, options = {}) {
 
   console.log(`전체 글 수: ${posts.length}`);
 
-  const result = await backupPosts(blogId, posts, {includePrivate, update});
-  printBackupSummary("블로그", result, {update});
+  const result = await backupPosts(blogId, posts, {includePrivate, update, noDownload});
+  printBackupSummary("블로그", result, {update, noDownload});
 
   return result;
 }
 
 async function backupCategory(url, categoryName = "", options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {includePrivate = false, update = false, noDownload = false} = options;
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
@@ -201,9 +217,9 @@ async function backupCategory(url, categoryName = "", options = {}) {
   console.log("게시글 목록을 가져오는 중...");
 
   const posts = await getCategoryPosts(blogId, category, categories, {includePrivate});
-  const result = await backupPosts(blogId, posts, {includePrivate, update});
+  const result = await backupPosts(blogId, posts, {includePrivate, update, noDownload});
 
-  printBackupSummary("카테고리", result, {update});
+  printBackupSummary("카테고리", result, {update, noDownload});
 
   return result;
 }
@@ -212,12 +228,15 @@ async function main() {
   const args = process.argv.slice(2);
   const includePrivate = args.includes("--private");
   const update = args.includes("--update");
-  const positionalArgs = args.filter(arg => arg !== "--private" && arg !== "--update");
+  const noDownload = args.includes("--no-download");
+  const positionalArgs = args.filter(arg => !["--private", "--update", "--no-download"].includes(arg));
   const url = positionalArgs[0];
   const categoryName = positionalArgs[1] || "";
 
   if (!url) {
-    console.error('사용법: npm run category -- "네이버 블로그 URL" "카테고리명" [--private] [--update]');
+    console.error(
+      '사용법: npm run category -- "네이버 블로그 URL" "카테고리명" [--private] [--update] [--no-download]'
+    );
     process.exitCode = 1;
     return;
   }
@@ -228,7 +247,7 @@ async function main() {
       await ensureLogin(parseBlogUrl(url).blogId);
     }
 
-    await backupCategory(url, categoryName, {includePrivate, update});
+    await backupCategory(url, categoryName, {includePrivate, update, noDownload});
   } catch (error) {
     console.error(error.message || error);
     process.exitCode = 1;
