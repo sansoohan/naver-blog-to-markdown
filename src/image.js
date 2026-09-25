@@ -197,20 +197,39 @@ function getFilenameSource(originalUrl, successfulUrl) {
   return nestedUrl || successfulUrl || originalUrl;
 }
 
+function shouldSkipImageUrl(value) {
+  const source = normalizeInputUrl(value);
+
+  if (!source) return false;
+
+  try {
+    const url = new URL(source.startsWith("//") ? `https:${source}` : source);
+    const filename = path.posix.basename(url.pathname).toLowerCase();
+
+    return ["btn_urlcopy.gif", "spc.gif", "00ico_lock_p_2.gif"].includes(filename);
+  } catch {
+    const filename = source.split(/[?#]/)[0].replace(/\\/g, "/").split("/").pop().toLowerCase();
+
+    return ["btn_urlcopy.gif", "spc.gif", "00ico_lock_p_2.gif"].includes(filename);
+  }
+}
+
 function getImageSources(image) {
   const sources = [];
   const attributes = ["data-lazy-src", "data-original", "data-origin-src", "data-src", "src"];
 
   for (const attribute of attributes) {
     const value = image.attr(attribute);
-    if (value && !sources.includes(value)) sources.push(value);
+
+    if (value && !shouldSkipImageUrl(value) && !sources.includes(value)) sources.push(value);
   }
 
   const srcset = image.attr("srcset") || "";
 
   for (const entry of srcset.split(",")) {
     const value = entry.trim().split(/\s+/)[0];
-    if (value && !sources.includes(value)) sources.push(value);
+
+    if (value && !shouldSkipImageUrl(value) && !sources.includes(value)) sources.push(value);
   }
 
   return sources;
@@ -385,6 +404,52 @@ function getLocalImageFilename(image) {
   return filename;
 }
 
+function normalizeImageIdentityUrl(value) {
+  const source = normalizeInputUrl(value);
+  if (!source) return "";
+
+  try {
+    const url = new URL(source.startsWith("//") ? `https:${source}` : source);
+
+    url.protocol = "https:";
+    url.hash = "";
+
+    if (/(^|\.)pstatic\.net$/i.test(url.hostname)) url.searchParams.delete("type");
+
+    return url.toString();
+  } catch {
+    return source;
+  }
+}
+
+function getImageIdentityUrls(image) {
+  const identities = [];
+
+  function add(value) {
+    const normalized = normalizeImageIdentityUrl(value);
+    if (!normalized || identities.includes(normalized)) return;
+    identities.push(normalized);
+  }
+
+  for (const source of getImageSources(image)) {
+    add(source);
+
+    const nestedUrl = getNestedFilenameUrl(source);
+    if (nestedUrl) add(nestedUrl);
+  }
+
+  return identities;
+}
+
+function imagesHaveSameIdentity(currentImage, previousImage) {
+  const currentIdentities = getImageIdentityUrls(currentImage);
+  const previousIdentities = getImageIdentityUrls(previousImage);
+
+  if (!currentIdentities.length || !previousIdentities.length) return false;
+
+  return currentIdentities.some(identity => previousIdentities.includes(identity));
+}
+
 function getComponentInfo($, image, root) {
   const component = image.closest(".se-component");
   if (!component.length) return null;
@@ -429,8 +494,10 @@ function findPreviousImageByComponent($, image, root, previous$, previousRoot, o
   if (!previousImageElement) return "";
 
   const previousImage = previous$(previousImageElement);
-  const filename = getLocalImageFilename(previousImage);
 
+  if (!imagesHaveSameIdentity(image, previousImage)) return "";
+
+  const filename = getLocalImageFilename(previousImage);
   if (!filename) return "";
 
   return getExistingFile(outputDir, filename);
@@ -455,14 +522,14 @@ function createImageManager(outputDir, managerOptions = {}) {
     if (url.startsWith("./")) return url.slice(2);
 
     /*
-     * --no-download에서 previous original.html과 정확히 대응된 이미지가 있으면
-     * URL cache보다 먼저 그 파일을 사용한다.
+     * previous original.html과 정확히 대응되고 원격 이미지 identity까지 같은 이미지가 있으면
+     * --no-download 여부와 관계없이 URL cache보다 먼저 기존 파일을 사용한다.
      *
      * 같은 URL을 사용하는 여러 이미지가
      * image.png / image_2.png / image_3.png처럼 서로 다른 파일로 저장되어 있을 수 있으므로
      * 이 경로에서는 URL 기반 메모리 cache를 사용하거나 기록하면 안 된다.
      */
-    if (noDownload && previousFilename) {
+    if (previousFilename) {
       const existingPreviousFilename = getExistingFile(outputDir, previousFilename);
 
       if (existingPreviousFilename) {
@@ -590,7 +657,13 @@ async function localizeImages($, root, imageManager, options = {}) {
 
     let previousFilename = "";
 
-    if (noDownload && previous$ && previousRoot) {
+    /*
+     * previous original.html이 있으면 --no-download 여부와 관계없이 기존 이미지 재사용을 시도한다.
+     *
+     * findPreviousImageByComponent() 내부에서 현재/이전 이미지의 원격 URL identity를 비교하므로
+     * 단순히 같은 위치에 있다는 이유만으로 다른 이미지를 잘못 재사용하지 않는다.
+     */
+    if (previous$ && previousRoot) {
       previousFilename = findPreviousImageByComponent(
         $,
         image,

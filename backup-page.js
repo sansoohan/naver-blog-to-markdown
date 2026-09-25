@@ -1,12 +1,12 @@
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const cheerio = require("cheerio");
 
 const {makeHtml, getPostRoot, detectEditorVersion} = require("./src/make-html");
 const {makeMarkdown} = require("./src/make-markdown");
 const {fetchNaver} = require("./src/naver-request");
 const {loadBackupCache, saveBackupCache, setResourceContext, clearResourceContext} = require("./src/backup-cache");
+const {createContentHash} = require("./src/content-hash");
 
 const OUTPUT_ROOT = path.join(process.cwd(), "output");
 
@@ -74,48 +74,6 @@ async function getPost(blogId, logNo, options = {}) {
   return response.text();
 }
 
-function createContentHash(root) {
-  const clone = root.clone();
-
-  clone.find("*").each((_, element) => {
-    const $el = clone.find(element);
-    const attrs = element.attribs || {};
-
-    for (const name of Object.keys(attrs)) {
-      if (name === "id") {
-        $el.removeAttr(name);
-      } else if (name.startsWith("data-")) {
-        if (name === "data-linktype") continue;
-        $el.removeAttr(name);
-      }
-    }
-  });
-
-  clone.find("script, style").remove();
-
-  clone.find("a").each((_, element) => {
-    const $el = clone.find(element);
-    const href = $el.attr("href");
-
-    if (!href) return;
-
-    try {
-      const url = new URL(href, "https://blog.naver.com");
-
-      for (const key of [...url.searchParams.keys()]) {
-        if (/^(hashKey|timestamp|ts|t|rnd|random|nonce)$/i.test(key)) url.searchParams.delete(key);
-      }
-
-      $el.attr("href", url.toString());
-    } catch {}
-  });
-
-  const html = clone.html().replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim();
-  const hash = crypto.createHash("sha256").update(html).digest("hex");
-
-  return {hash, source: html};
-}
-
 function removeDirectory(directory) {
   if (!directory || !fs.existsSync(directory)) return;
   fs.rmSync(directory, {recursive: true, force: true});
@@ -131,8 +89,6 @@ function copyDirectory(source, destination) {
 
     const sourcePath = path.join(source, entry.name);
     const destinationPath = path.join(destination, entry.name);
-
-    console.log(`DEBUG COPY: ${sourcePath}`);
 
     if (entry.isDirectory()) {
       copyDirectory(sourcePath, destinationPath);
@@ -163,10 +119,6 @@ async function renameDirectory(source, destination) {
   }
 
   throw lastError;
-}
-
-function saveDebugRaw(html) {
-  fs.writeFileSync(path.join(process.cwd(), "debug-raw.html"), html, "utf8");
 }
 
 function backupExists(outputDir) {
@@ -229,8 +181,6 @@ async function convertPost(blogId, logNo, options = {}) {
   console.log(`가져오는 중: https://blog.naver.com/${blogId}/${logNo}`);
 
   const rawHtml = await getPost(blogId, logNo, {includePrivate});
-
-  saveDebugRaw(rawHtml);
 
   const $ = cheerio.load(rawHtml, {decodeEntities: false});
   const root = getPostRoot($);
@@ -321,22 +271,15 @@ async function convertPost(blogId, logNo, options = {}) {
     if (resourceSourceDir) {
       const previousHtmlPath = path.join(resourceSourceDir, "original.html");
 
-      console.log("DEBUG 1: previousHtml 읽기 전");
       if (fs.existsSync(previousHtmlPath)) previousHtml = fs.readFileSync(previousHtmlPath, "utf8");
-      console.log("DEBUG 2: previousHtml 읽기 완료");
 
-      console.log("DEBUG 3: 폴더 복사 전");
       copyDirectory(resourceSourceDir, tempOutputDir);
-      console.log("DEBUG 4: 폴더 복사 완료");
 
       fs.rmSync(path.join(tempOutputDir, "original.html"), {force: true});
       fs.rmSync(path.join(tempOutputDir, "index.md"), {force: true});
-      console.log("DEBUG 5: 기존 HTML/MD 삭제 완료");
     }
 
-    console.log("DEBUG 6: setResourceContext 전");
     setResourceContext(cacheKey, tempOutputDir, useCache);
-    console.log("DEBUG 7: setResourceContext 완료");
 
     console.log(`HTML 생성 중: ${title}`);
 
@@ -485,7 +428,6 @@ module.exports = {
   parsePostUrl,
   getPost,
   getPostRoot,
-  createContentHash,
   extractPostCategoryNo,
   resolvePostCategoryPath,
 };

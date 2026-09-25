@@ -4,13 +4,11 @@ const {chromium}=require("playwright");
 
 const AUTH_DIR=path.join(process.cwd(),".auth");
 const PROFILE_DIR=path.join(AUTH_DIR,"naver-profile");
-const AUTH_STATE_FILE=path.join(AUTH_DIR,"naver-storage-state.json");
 
 const NAVER_URL="https://www.naver.com/";
 const LOGIN_URL="https://nid.naver.com/nidlogin.login";
 const LOGIN_TIMEOUT=10*60*1000;
 
-let browser=null;
 let context=null;
 let page=null;
 let cdpSession=null;
@@ -18,14 +16,6 @@ let windowId=null;
 
 function ensureAuthDirectory() {
   fs.mkdirSync(AUTH_DIR,{recursive:true});
-}
-
-function hasSavedAuthState() {
-  try {
-    return fs.statSync(AUTH_STATE_FILE).size>0;
-  } catch {
-    return false;
-  }
 }
 
 function hasSavedProfile() {
@@ -52,8 +42,9 @@ async function launchBrowser() {
   ensureAuthDirectory();
 
   try {
-    browser=await chromium.launch({
+    context=await chromium.launchPersistentContext(PROFILE_DIR,{
       headless:false,
+      viewport:null,
       args:[
         "--start-minimized",
         "--disable-background-timer-throttling",
@@ -61,23 +52,17 @@ async function launchBrowser() {
         "--disable-renderer-backgrounding",
       ],
     });
-
-    const options={viewport:null};
-
-    if(hasSavedAuthState()) options.storageState=AUTH_STATE_FILE;
-
-    context=await browser.newContext(options);
   } catch(error) {
-    if(/Executable doesn't exist|chromium\.launch/i.test(error.message)) {
-      throw new Error(
-        "Playwright Chromium이 설치되어 있지 않습니다.\n\nnpx playwright install chromium"
-      );
+    if(/Executable doesn't exist|launchPersistentContext/i.test(error.message)) {
+      throw new Error("Playwright Chromium이 설치되어 있지 않습니다.\n\nnpx playwright install chromium");
     }
 
     throw error;
   }
 
-  page=await context.newPage();
+  const pages=context.pages();
+
+  page=pages[0]||await context.newPage();
 
   await setupWindowControl();
 
@@ -149,22 +134,6 @@ async function hasLoginCookie() {
   });
 }
 
-async function saveAuthState() {
-  if(!context) return;
-
-  ensureAuthDirectory();
-
-  try {
-    await context.storageState({path:AUTH_STATE_FILE});
-  } catch {}
-}
-
-function deleteSavedAuthState() {
-  try {
-    fs.unlinkSync(AUTH_STATE_FILE);
-  } catch {}
-}
-
 async function isDeviceRegistrationPromptVisible() {
   if(!context) return false;
 
@@ -217,7 +186,6 @@ async function waitForDeviceRegistrationChoice(startedAt) {
 /*
  * 기존 로그인 흐름에서 사용하는 함수.
  *
- * 원래 코드의 동작을 그대로 유지한다.
  * 쿠키가 있으면 로그인 상태로 판단하고 페이지를 이동시키지 않는다.
  */
 async function verifyNaverLogin() {
@@ -231,11 +199,8 @@ async function verifyNaverLogin() {
     if(isLoginUrl(page.url())) return false;
 
     const logoutLink=await page.locator('a[href*="nidlogin.logout"]').count().catch(()=>0);
-    const loggedIn=logoutLink>0||await hasLoginCookie();
 
-    if(loggedIn) await saveAuthState();
-
-    return loggedIn;
+    return logoutLink>0||await hasLoginCookie();
   } catch {
     return false;
   }
@@ -243,8 +208,6 @@ async function verifyNaverLogin() {
 
 /*
  * 기존 로그인 완료 후 블로그 소유자 권한 확인.
- *
- * 원래 코드의 흐름을 그대로 유지한다.
  */
 async function verifyBlogOwner(blogId) {
   if(!page||page.isClosed()||!blogId) return false;
@@ -269,17 +232,11 @@ async function verifyBlogOwner(blogId) {
   }
 }
 
-async function verifyAuth(blogId="") {
-  return blogId?verifyBlogOwner(blogId):verifyNaverLogin();
-}
-
 /*
- * 저장된 세션을 처음 불러왔을 때만 사용하는 검사.
+ * persistent profile을 처음 열었을 때 사용하는 검사.
  *
  * blogId가 있으면 PostWriteForm을 직접 요청한다.
  * 여기서는 hasLoginCookie()만으로 성공 처리하지 않는다.
- *
- * 이 함수는 waitForLogin()에서는 절대 호출하지 않는다.
  */
 async function verifySavedAuth(blogId="") {
   if(!page||page.isClosed()) return false;
@@ -297,37 +254,32 @@ async function verifySavedAuth(blogId="") {
 
       if(/로그인이 필요|로그인 후 이용|권한이 없|접근 권한/i.test(html)) return false;
 
-      const owner=finalUrl.includes("PostWriteForm.naver")||/글쓰기|publish|editor/i.test(html);
-
-      if(owner) await saveAuthState();
-
-      return owner;
+      return finalUrl.includes("PostWriteForm.naver")||/글쓰기|publish|editor/i.test(html);
     } catch {
       return false;
     }
   }
 
-  /*
-   * blogId 없이 ensureLogin()을 호출한 경우에만 사용한다.
-   */
   try {
     await page.goto(NAVER_URL,{waitUntil:"domcontentloaded",timeout:60000});
 
     if(isLoginUrl(page.url())) return false;
 
     const logoutLink=await page.locator('a[href*="nidlogin.logout"]').count().catch(()=>0);
-    const loggedIn=logoutLink>0||await hasLoginCookie();
 
-    if(loggedIn) await saveAuthState();
-
-    return loggedIn;
+    return logoutLink>0||await hasLoginCookie();
   } catch {
     return false;
   }
 }
 
 /*
- * 여기부터는 처음 사용하던 로그인 흐름을 그대로 유지한다.
+ * 기존 로그인 흐름을 그대로 유지한다.
+ *
+ * 로그인
+ * → 기기 등록 화면이 있으면 사용자가 선택할 때까지 대기
+ * → 블로그 소유자 확인
+ * → 브라우저 최소화
  */
 async function waitForLogin(blogId="") {
   console.log("브라우저에서 네이버에 로그인해주세요.");
@@ -376,8 +328,6 @@ async function waitForLogin(blogId="") {
       continue;
     }
 
-    await saveAuthState();
-
     console.log("네이버 로그인 정보 저장 완료");
 
     await minimizeBrowser();
@@ -389,30 +339,21 @@ async function waitForLogin(blogId="") {
 }
 
 async function ensureLogin(blogId="") {
-  const savedState=hasSavedAuthState();
   const savedProfile=hasSavedProfile();
 
-  if(savedState) {
-    console.log("저장된 네이버 로그인 정보를 불러옵니다.");
-  } else if(savedProfile) {
-    console.log("기존 네이버 프로필이 있지만 로그인 정보 파일은 없습니다.");
+  if(savedProfile) {
+    console.log("저장된 네이버 브라우저 프로필을 불러옵니다.");
   } else {
-    console.log("저장된 네이버 로그인 정보가 없습니다.");
+    console.log("저장된 네이버 브라우저 프로필이 없습니다.");
   }
 
   await launchBrowser();
 
-  if(savedState) {
+  if(savedProfile) {
     const label=blogId?"저장된 블로그 소유자 세션":"저장된 네이버 로그인 상태";
 
     console.log(`${label}을 확인합니다...`);
 
-    /*
-     * 변경된 부분.
-     *
-     * 저장된 세션에 대해서만 별도의 서버 검증을 한다.
-     * waitForLogin()의 기존 로그인 흐름에는 영향을 주지 않는다.
-     */
     if(await verifySavedAuth(blogId)) {
       console.log("저장된 네이버 로그인 세션을 사용합니다.");
 
@@ -422,12 +363,14 @@ async function ensureLogin(blogId="") {
     }
 
     console.log("저장된 네이버 로그인 세션이 만료되었거나 블로그 관리 권한이 없습니다.");
-
-    deleteSavedAuthState();
   }
 
   console.log("네이버 로그인이 필요합니다.");
 
+  /*
+   * 세션이 만료되어도 프로필은 삭제하지 않는다.
+   * 같은 persistent profile에서 다시 로그인한다.
+   */
   await waitForLogin(blogId);
 }
 
@@ -461,21 +404,16 @@ async function getAuthPage() {
 }
 
 async function closeAuth() {
-  await saveAuthState();
-
+  /*
+   * persistent context를 정상 종료하면 쿠키와 브라우저 상태가
+   * PROFILE_DIR에 그대로 유지된다.
+   */
   if(context) {
     try {
       await context.close();
     } catch {}
   }
 
-  if(browser) {
-    try {
-      await browser.close();
-    } catch {}
-  }
-
-  browser=null;
   context=null;
   page=null;
   cdpSession=null;
