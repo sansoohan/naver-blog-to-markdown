@@ -223,7 +223,9 @@ function makeAttachmentMarkdownBlock(items) {
   return [
     "---",
     "",
-    ...items.map(item => makeAttachmentMarkdown(item.filename, item.href, item.size)),
+    items
+      .map(item => makeAttachmentMarkdown(item.filename, item.href, item.size))
+      .join("\n\n"),
     "",
     "---",
   ].join("\n");
