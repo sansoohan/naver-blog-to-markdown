@@ -12,7 +12,7 @@ function SearchBox({ initialQuery = "" }: SearchBoxProps) {
 
   return (
     <form
-      className="search-box"
+      className="d-flex align-items-center gap-2"
       onSubmit={event => {
         event.preventDefault();
 
@@ -32,11 +32,7 @@ function SearchBox({ initialQuery = "" }: SearchBoxProps) {
         aria-label="제목 검색"
       />
 
-      <button
-        type="submit"
-        className="btn btn-outline-secondary btn-sm"
-        disabled={!query.trim()}
-      >
+      <button type="submit" className="btn btn-outline-secondary btn-sm" disabled={!query.trim()}>
         검색
       </button>
     </form>

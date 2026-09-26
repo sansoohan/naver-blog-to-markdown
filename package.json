@@ -14,6 +14,7 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "bootstrap": "^5.3.8",
     "cheerio": "^1.2.0",
     "js-beautify": "^2.0.3",
     "playwright": "^1.63.0",
