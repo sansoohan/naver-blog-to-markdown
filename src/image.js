@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const {downloadFirst, getFilenameFromUrl} = require("./downloader");
+const {downloadFirst, getFilenameFromUrl, getUniqueFilename} = require("./downloader");
 
 function decodeLegacyEucKr(value) {
   const source = String(value || "");
@@ -299,6 +299,78 @@ function getExistingFile(outputDir, filename) {
   return filename;
 }
 
+function getExistingFilenameCandidates(filename) {
+  const candidates = [];
+
+  function add(value) {
+    if (!value || candidates.includes(value)) return;
+    candidates.push(value);
+  }
+
+  add(filename);
+
+  const ext = path.extname(filename);
+
+  if (!ext) {
+    add(`${filename}.jpg`);
+    add(`${filename}.jpeg`);
+    add(`${filename}.png`);
+    add(`${filename}.webp`);
+    add(`${filename}.gif`);
+    add(`${filename}.bmp`);
+    add(`${filename}.svg`);
+    add(`${filename}.avif`);
+  }
+
+  if (ext.toLowerCase() === ".img") {
+    const base = path.basename(filename, ext);
+
+    add(`${base}.jpg`);
+    add(`${base}.jpeg`);
+    add(`${base}.png`);
+    add(`${base}.webp`);
+    add(`${base}.gif`);
+    add(`${base}.bmp`);
+    add(`${base}.svg`);
+    add(`${base}.avif`);
+  }
+
+  return candidates;
+}
+
+function getExistingImageFilename(outputDir, originalUrl, candidates, fallback) {
+  const filenameUrls = [];
+
+  function addFilenameUrl(value) {
+    const source = normalizeInputUrl(value);
+    if (!source || filenameUrls.includes(source)) return;
+    filenameUrls.push(source);
+  }
+
+  const nestedUrl = getNestedFilenameUrl(originalUrl);
+
+  addFilenameUrl(originalUrl);
+  addFilenameUrl(nestedUrl);
+
+  for (const candidate of candidates) addFilenameUrl(candidate);
+
+  for (const source of filenameUrls) {
+    const rawFilename = getFilenameFromUrl(source, "");
+    if (!rawFilename) continue;
+
+    const filename = safeFilename(rawFilename, fallback);
+    if (!filename) continue;
+
+    for (const candidateFilename of getExistingFilenameCandidates(filename)) {
+      const existingFilename = getExistingFile(outputDir, candidateFilename);
+
+      if (existingFilename) return existingFilename;
+    }
+  }
+
+  return "";
+}
+
 function getLocalImageFilename(image) {
   if (!image || !image.length) return "";
 
@@ -419,7 +491,7 @@ function findPreviousImageByComponent($, image, root, previous$, previousRoot, o
   return getExistingFile(outputDir, filename);
 }
 
-function createImageManager(outputDir) {
+function createImageManager(outputDir, managerOptions = {}) {
   const cache = new Map();
   let fallbackIndex = 0;
 
@@ -473,32 +545,36 @@ function createImageManager(outputDir) {
     let filename = safeFilename(getFilenameFromUrl(filenameSource, fallback), fallback);
     if (!path.extname(filename)) filename += ".img";
 
-    const result = await downloadFirst(candidates, {
-      outputDir,
-      filename,
-      fallbackFilename: filename,
-      timeout,
-      logLabel: "이미지",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Referer: "https://blog.naver.com/",
-        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-      },
-      validate: async (buffer, {contentType}) => {
-        if (!isImageBuffer(buffer, contentType)) {
-          throw new Error(`이미지가 아닌 응답: ${contentType || "unknown"}`);
-        }
-      },
-      resolveFilename: ({buffer, contentType}) => {
-        if (path.extname(filename).toLowerCase() !== ".img") return filename;
+    try {
+      const result = await downloadFirst(candidates, {
+        outputDir,
+        filename,
+        fallbackFilename: filename,
+        timeout,
+        logLabel: "이미지",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Referer: "https://blog.naver.com/",
+          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        },
+        validate: async (buffer, {contentType}) => {
+          if (!isImageBuffer(buffer, contentType)) {
+            throw new Error(`이미지가 아닌 응답: ${contentType || "unknown"}`);
+          }
+        },
+        resolveFilename: ({buffer, contentType}) => {
+          if (path.extname(filename).toLowerCase() !== ".img") return filename;
 
-        const extension = getExtensionFromBuffer(buffer, contentType, ".jpg");
-        return `${path.basename(filename, ".img")}${extension}`;
-      },
-    });
+          const extension = getExtensionFromBuffer(buffer, contentType, ".jpg");
+          return `${path.basename(filename, ".img")}${extension}`;
+        },
+      });
 
-    cache.set(cacheKey, result.filename);
-    return result.filename;
+      cache.set(cacheKey, result.filename);
+      return result.filename;
+    } catch (error) {
+      throw error;
+    }
   }
 
   return {
@@ -551,7 +627,7 @@ async function localizeImages($, root, imageManager, options = {}) {
     const sources = getImageSources(image);
     if (!sources.length) continue;
 
-    const isOgImage = Boolean(image.closest(".se-oglink").length);
+    const isOgImage = Boolean(image.closest(".se-oglink,.og").length);
 
     let previousFilename = "";
 
@@ -585,12 +661,22 @@ async function localizeImages($, root, imageManager, options = {}) {
       console.warn(`이미지 다운로드 실패: ${sources.join(", ")}`);
       console.warn(error.message);
 
-      if (!isOgImage) replaceWithMissingImage(image);
+      if (isOgImage) {
+        image.attr("data-download-error", "true");
+      } else {
+        replaceWithMissingImage(image);
+      }
+
       continue;
     }
 
     if (!downloaded.filename) {
-      if (!isOgImage) replaceWithMissingImage(image);
+      if (isOgImage) {
+        image.attr("data-download-error", "true");
+      } else {
+        replaceWithMissingImage(image);
+      }
+
       continue;
     }
 

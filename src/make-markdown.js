@@ -266,12 +266,11 @@ function protectOgCards($, root, store) {
     const domain = legacy
       ? component.find(".cp").first().text().trim()
       : component.find(".se-oglink-url").first().text().trim();
-    const imageSrc = component.find("img").first().attr("src") || "";
-    const parts = [];
 
-    if (imageSrc) {
-      parts.push(`<img src="${escapeHtmlAttribute(imageSrc)}" width="120">`);
-    }
+    const image = component.find("img").first();
+    const imageFailed = image.attr("data-download-error") === "true";
+    const imageSrc = imageFailed ? "" : image.attr("src") || "";
+    const isLarge = component.find(".thumb.b_size").length > 0;
 
     const text = [
       title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
@@ -279,9 +278,22 @@ function protectOgCards($, root, store) {
       domain ? `<small>${escapeHtmlText(domain)}</small>` : "",
     ].filter(Boolean).join("<br>");
 
-    parts.push(`<a href="${escapeHtmlAttribute(href)}">${text}</a>`);
+    const textHtml = `<a href="${escapeHtmlAttribute(href)}">${text}</a>`;
+    let imageHtml = "";
 
-    const html = `<div style="display:flex;gap:12px;align-items:center;">${parts.join("")}</div>`;
+    if (imageSrc) {
+      imageHtml = isLarge
+        ? `<img src="${escapeHtmlAttribute(imageSrc)}" style="display:block;max-width:100%;">`
+        : `<img src="${escapeHtmlAttribute(imageSrc)}" width="120">`;
+    } else if (imageFailed) {
+      imageHtml = isLarge
+        ? `<div style="width:100%;aspect-ratio:513/268;display:flex;align-items:center;justify-content:center;background:#f5f5f5;color:#999;">이미지를 불러올 수 없습니다.</div>`
+        : `<div style="width:120px;height:120px;flex:0 0 120px;display:flex;align-items:center;justify-content:center;background:#f5f5f5;color:#999;text-align:center;">이미지를 불러올 수 없습니다.</div>`;
+    }
+
+    const html = isLarge
+      ? `<div class="naver-og-card-large" style="border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`
+      : `<div style="display:flex;gap:12px;align-items:center;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`;
 
     component.replaceWith(
       `<div class="naver-protected">${store.add(html)}</div>`
