@@ -110,10 +110,10 @@ function getPostRoot($, editorVersion = 0) {
 }
 
 function restoreEmptyLines(markdown) {
-  return String(markdown)
-    .replace(/(?:NAVEREMPTYLINE\s*){3,}/g, "<br>\n<br>\n")
-    .replace(/(?:NAVEREMPTYLINE\s*){2}/g, "<br>\n<br>\n")
-    .replace(/NAVEREMPTYLINE/g, "<br>");
+  return String(markdown).replace(/(?:NAVEREMPTYLINE\s*)+/g, match => {
+    const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
+    return Array(count).fill("<br>").join("\n");
+  });
 }
 
 function normalizeBreakSpacing(markdown) {
