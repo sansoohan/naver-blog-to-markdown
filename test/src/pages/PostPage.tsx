@@ -23,7 +23,7 @@ function PostPage() {
 
   if (loading) {
     return (
-      <div className="d-flex flex-column w-100 vh-100 bg-white">
+      <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
         <div className="d-flex align-items-center justify-content-center flex-grow-1 text-secondary small">
           게시글 목록을 불러오는 중...
         </div>
@@ -33,7 +33,7 @@ function PostPage() {
 
   if (error) {
     return (
-      <div className="d-flex flex-column w-100 vh-100 bg-white">
+      <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
         <div className="d-flex align-items-center justify-content-center flex-grow-1 text-danger small">{error}</div>
       </div>
     );

@@ -12,6 +12,7 @@ type ToolbarProps = {
   onSelectCategory: (category: string) => void;
   onSelectPost: (id: string) => void;
   onRefresh: () => void;
+  onSettings: () => void;
 };
 
 function Toolbar({
@@ -25,6 +26,7 @@ function Toolbar({
   onSelectCategory,
   onSelectPost,
   onRefresh,
+  onSettings,
 }: ToolbarProps) {
   return (
     <header className="toolbar align-items-center gap-3 flex-shrink-0 px-3 py-2 border-bottom">
@@ -80,11 +82,15 @@ function Toolbar({
         </select>
       </div>
 
-      <div className="toolbar-actions d-flex align-items-center gap-2">
+      <div className="d-flex align-items-center gap-2">
         <SearchBox />
 
         <button className="btn btn-outline-secondary btn-sm" onClick={onRefresh} disabled={!currentPost}>
           새로고침
+        </button>
+
+        <button className="btn btn-outline-secondary btn-sm" onClick={onSettings}>
+          설정
         </button>
       </div>
     </header>

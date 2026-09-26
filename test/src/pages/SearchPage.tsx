@@ -132,7 +132,7 @@ function SearchPage() {
   };
 
   return (
-    <div className="app search-page d-flex flex-column w-100 vh-100 bg-white overflow-hidden">
+    <div className="app search-page d-flex flex-column w-100 vh-100 bg-body text-body overflow-hidden">
       <header className="search-header d-flex align-items-center gap-3 flex-shrink-0 px-3 py-2 border-bottom">
         <button className="btn btn-outline-secondary btn-sm" onClick={() => navigate(ROUTE_HOME)}>
           홈

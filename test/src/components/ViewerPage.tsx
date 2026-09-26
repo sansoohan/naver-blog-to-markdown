@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import type { PostInfo } from "../types/post";
 import { getPostRoute } from "../utils/route";
+import { applyMarkdownSettings, applyOriginalSettings } from "../utils/settings";
+import SettingsModal from "./SettingsModal";
 import Toolbar from "./Toolbar";
 
 const DEFAULT_MARKDOWN_ZOOM = 80;
@@ -18,7 +21,11 @@ type ViewerPageProps = {
 
 function ViewerPage({ posts, postId }: ViewerPageProps) {
   const navigate = useNavigate();
+  const { removeParagraphMargins, darkMode } = useAppSettings();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [originalLoaded, setOriginalLoaded] = useState(false);
+  const [markdownLoaded, setMarkdownLoaded] = useState(false);
 
   const [markdownZoom, setMarkdownZoom] = useState(() => {
     const saved = Number(localStorage.getItem("markdownZoom"));
@@ -30,6 +37,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     return DEFAULT_MARKDOWN_ZOOM;
   });
 
+  const originalFrameRef = useRef<HTMLIFrameElement>(null);
   const markdownFrameRef = useRef<HTMLIFrameElement>(null);
 
   const currentIndex = useMemo(() => {
@@ -52,6 +60,11 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     if (!currentPost) return;
     localStorage.setItem(LAST_VIEWED_POST_KEY, currentPost.id);
   }, [currentPost]);
+
+  useEffect(() => {
+    setOriginalLoaded(false);
+    setMarkdownLoaded(false);
+  }, [currentPost?.id, refreshKey]);
 
   const goToPost = (post: PostInfo) => {
     navigate(getPostRoute(post.id));
@@ -100,7 +113,6 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
       const next = Math.min(MAX_MARKDOWN_ZOOM, Math.max(MIN_MARKDOWN_ZOOM, current + amount));
 
       localStorage.setItem("markdownZoom", String(next));
-
       return next;
     });
   };
@@ -111,12 +123,17 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   };
 
   useEffect(() => {
-    const document = markdownFrameRef.current?.contentDocument;
+    const originalDocument = originalFrameRef.current?.contentDocument;
+    const markdownDocument = markdownFrameRef.current?.contentDocument;
 
-    if (!document) return;
+    if (originalDocument) {
+      applyOriginalSettings(originalDocument, darkMode);
+    }
 
-    document.documentElement.style.zoom = `${markdownZoom}%`;
-  }, [markdownZoom, currentPost?.id, refreshKey]);
+    if (markdownDocument) {
+      applyMarkdownSettings(markdownDocument, markdownZoom, removeParagraphMargins, darkMode);
+    }
+  }, [markdownZoom, removeParagraphMargins, darkMode, currentPost?.id, refreshKey]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -127,6 +144,11 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement
       ) {
+        return;
+      }
+
+      if (event.key === "Escape" && settingsOpen) {
+        setSettingsOpen(false);
         return;
       }
 
@@ -152,10 +174,10 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [posts, currentIndex, navigate]);
+  }, [posts, currentIndex, navigate, settingsOpen]);
 
   return (
-    <div className="app d-flex flex-column w-100 vh-100 bg-white">
+    <div className="app d-flex flex-column w-100 vh-100 bg-body text-body">
       <Toolbar
         posts={posts}
         currentPost={currentPost}
@@ -167,27 +189,42 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         onSelectCategory={selectCategory}
         onSelectPost={selectPost}
         onRefresh={refresh}
+        onSettings={() => setSettingsOpen(true)}
       />
 
-      <main className="compare-view flex-grow-1">
-        <section className="viewer d-flex flex-column">
-          <div className="viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 border-bottom bg-light fw-semibold">
+      <main className="compare-view flex-grow-1 bg-body text-body">
+        <section className="viewer d-flex flex-column bg-body">
+          <div
+            className={
+              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 " +
+              "border-bottom bg-body-tertiary fw-semibold"
+            }
+          >
             <span>original.html</span>
 
             {currentPost && !currentPost.hasHtml && <span className="missing-file text-danger fw-normal">파일 없음</span>}
           </div>
 
-          <div className="viewer-body flex-grow-1 overflow-hidden">
+          <div className="viewer-body flex-grow-1 overflow-hidden bg-body">
             {!currentPost ? (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 선택된 게시글이 없습니다.
               </div>
             ) : currentPost.hasHtml ? (
               <iframe
+                ref={originalFrameRef}
                 key={`${currentPost.id}-html-${refreshKey}`}
-                className="viewer-frame bg-white"
+                className={`viewer-frame ${originalLoaded ? "visible" : "invisible"}`}
                 src={getOriginalUrl(currentPost)}
                 title="Original HTML"
+                onLoad={event => {
+                  const document = event.currentTarget.contentDocument;
+
+                  if (!document) return;
+
+                  applyOriginalSettings(document, darkMode);
+                  setOriginalLoaded(true);
+                }}
               />
             ) : (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
@@ -197,8 +234,13 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
           </div>
         </section>
 
-        <section className="viewer d-flex flex-column border-start">
-          <div className="viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 border-bottom bg-light fw-semibold">
+        <section className="viewer d-flex flex-column border-start bg-body">
+          <div
+            className={
+              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 " +
+              "border-bottom bg-body-tertiary fw-semibold"
+            }
+          >
             <span>index.md</span>
 
             <div className="d-flex align-items-center gap-2 ms-auto">
@@ -236,7 +278,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             </div>
           </div>
 
-          <div className="viewer-body flex-grow-1 overflow-hidden">
+          <div className="viewer-body flex-grow-1 overflow-hidden bg-body">
             {!currentPost ? (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 선택된 게시글이 없습니다.
@@ -245,7 +287,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
               <iframe
                 ref={markdownFrameRef}
                 key={`${currentPost.id}-markdown-${refreshKey}`}
-                className="viewer-frame bg-white"
+                className={`viewer-frame ${markdownLoaded ? "visible" : "invisible"}`}
                 src={getMarkdownUrl(currentPost)}
                 title="Markdown"
                 onLoad={event => {
@@ -253,7 +295,8 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
 
                   if (!document) return;
 
-                  document.documentElement.style.zoom = `${markdownZoom}%`;
+                  applyMarkdownSettings(document, markdownZoom, removeParagraphMargins, darkMode);
+                  setMarkdownLoaded(true);
                 }}
               />
             ) : (
@@ -264,6 +307,8 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
           </div>
         </section>
       </main>
+
+      <SettingsModal show={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
