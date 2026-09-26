@@ -204,8 +204,11 @@ function removeTextPrefix(runs, length) {
 
 function escapeMarkdownText(text) {
   return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
     .replace(/\\/g, "\\\\")
-    .replace(/([`*_[\]<>~])/g, "\\$1")
+    .replace(/([`*_[\]~])/g, "\\$1")
     .replace(/^([ \t]*)(#{1,6}|>|[-+])(?=\s)/gm, "$1\\$2")
     .replace(/^([ \t]*)(\d+)\.(?=\s)/gm, "$1$2\\.");
 }
