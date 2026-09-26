@@ -488,6 +488,57 @@ function protectTextLists($, root, store) {
   }
 }
 
+/*
+ * SmartEditor 1/2의 구형 본문은 SmartEditor 3/4처럼
+ * .se-component.se-text / p.se-text-paragraph 구조를 사용하지 않고
+ * 일반 <p>를 사용하는 경우가 있다.
+ *
+ * 이 문단들을 Turndown에 그대로 넘기면 빈 <p>가 사라질 수 있으므로
+ * 일반 텍스트 <p>를 미리 보호한다.
+ */
+function protectLegacyParagraphs($, root, store) {
+  const paragraphs = root.find("p").toArray();
+
+  for (const element of paragraphs) {
+    const paragraph = $(element);
+
+    /*
+     * SmartEditor 3/4 문단은 아래 기존 로직이 담당한다.
+     */
+    if (paragraph.hasClass("se-text-paragraph")) continue;
+
+    /*
+     * 다른 변환기가 이미 보호한 영역은 건드리지 않는다.
+     */
+    if (paragraph.closest(".naver-protected").length) continue;
+
+    /*
+     * 단순 텍스트 문단만 처리한다.
+     *
+     * 이미지, 표, 영상, 목록, 코드, 인용문 등의 블록 구조가 들어 있는
+     * <p>는 다른 변환 로직이나 Turndown이 처리하도록 그대로 둔다.
+     */
+    if (
+      paragraph.find(
+        "img,table,iframe,video,ul,ol,pre,blockquote"
+      ).length
+    ) {
+      continue;
+    }
+
+    const rendered = renderParagraph(element);
+    const value = rendered.empty
+      ? "NAVEREMPTYLINE"
+      : rendered.text;
+
+    const token = store.add(value);
+
+    paragraph.replaceWith(
+      `<div class="naver-protected">${token}</div>`
+    );
+  }
+}
+
 function protectTextComponents($, root, store) {
   /*
    * 네이버 SmartEditor의 목록은 일반 문단과 같은 .se-component.se-text 안에
@@ -518,6 +569,11 @@ function protectTextComponents($, root, store) {
 
     $(element).replaceWith(`<div class="naver-protected">${token}</div>`);
   });
+
+  /*
+   * SmartEditor 1/2 구형 일반 <p> 처리.
+   */
+  protectLegacyParagraphs($, root, store);
 }
 
 module.exports = {
