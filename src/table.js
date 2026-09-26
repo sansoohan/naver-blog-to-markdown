@@ -213,6 +213,19 @@ function protectTables($, root, store) {
 
     component.replaceWith(`<div class="naver-protected">${store.add(output)}</div>`);
   });
+
+  root.find("table").each((_, element) => {
+    const table = $(element);
+
+    if (!table.closest(".post-view").length) return;
+    if (table.closest(".naver-protected").length) return;
+
+    const output = isSimpleTable($, table)
+      ? renderSimpleTable($, table)
+      : renderComplexTable($, table);
+
+    table.replaceWith(`<div class="naver-protected">${store.add(output)}</div>`);
+  });
 }
 
 module.exports = {
