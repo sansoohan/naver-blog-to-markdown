@@ -381,7 +381,9 @@ function renderParagraph(node) {
   const plainText = runs.filter((run) => run.type === "text").map((run) => run.text).join("");
   const hasBreak = runs.some((run) => run.type === "break");
 
-  if (!plainText.trim() && !hasBreak) return { empty: true, text: "" };
+  if (!plainText.trim() && (!hasBreak || runs.every((run) => run.type === "break" || !run.text?.trim()))) {
+    return { empty: true, text: "" };
+  }
 
   const paragraphSize = getParagraphFontSize(runs);
   const mixed = hasMixedFontSizes(runs);

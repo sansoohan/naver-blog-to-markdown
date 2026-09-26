@@ -247,18 +247,25 @@ function protectStandaloneImages($, root, store) {
 }
 
 function protectOgCards($, root, store) {
-  const components = root.find(".se-component.se-oglink").toArray();
+  const components = root.find(".se-component.se-oglink,.og").toArray();
 
   for (const element of components) {
     const component = $(element);
+    const legacy = component.hasClass("og");
     const link = component.find("a[href]").first();
 
     if (!link.length) continue;
 
     const href = link.attr("href") || "";
-    const title = component.find(".se-oglink-title").first().text().trim() || link.attr("title") || href;
-    const summary = component.find(".se-oglink-summary").first().text().trim();
-    const domain = component.find(".se-oglink-url").first().text().trim();
+    const title = legacy
+      ? component.find(".tit").first().text().trim() || link.attr("title") || href
+      : component.find(".se-oglink-title").first().text().trim() || link.attr("title") || href;
+    const summary = legacy
+      ? component.find(".dsc").first().text().trim()
+      : component.find(".se-oglink-summary").first().text().trim();
+    const domain = legacy
+      ? component.find(".cp").first().text().trim()
+      : component.find(".se-oglink-url").first().text().trim();
     const imageSrc = component.find("img").first().attr("src") || "";
     const parts = [];
 
