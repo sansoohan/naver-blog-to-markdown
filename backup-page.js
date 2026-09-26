@@ -7,6 +7,7 @@ const {makeMarkdown} = require("./src/make-markdown");
 const {fetchNaver} = require("./src/naver-request");
 const {loadBackupCache, saveBackupCache, setResourceContext, clearResourceContext} = require("./src/backup-cache");
 const {createContentHash} = require("./src/content-hash");
+const {html: beautifyHtml} = require("js-beautify");
 
 const OUTPUT_ROOT = path.join(process.cwd(), "output");
 
@@ -289,7 +290,18 @@ async function convertPost(blogId, logNo, options = {}) {
 
     if (!fs.existsSync(hashSourcePath)) fs.writeFileSync(hashSourcePath, hashSource, "utf8");
 
-    fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
+    fs.writeFileSync(
+      path.join(tempOutputDir, "original.html"),
+      beautifyHtml(originalHtml, {
+        indent_size: 2,
+        indent_char: " ",
+        max_preserve_newlines: 1,
+        preserve_newlines: true,
+        wrap_line_length: 0,
+        end_with_newline: true,
+      }),
+      "utf8"
+    );
 
     console.log("Markdown 생성 중...");
 
