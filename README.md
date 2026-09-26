@@ -99,7 +99,7 @@ npm install --prefix test/server
 QA 테스터를 실행합니다.
 
 ```bash
-npm run test:gui
+npm run test
 ```
 
 클라이언트와 서버가 함께 실행됩니다. 터미널에 표시된 주소(기본 `http://localhost:5173`)를 브라우저에서 엽니다.
