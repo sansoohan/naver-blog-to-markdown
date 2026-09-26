@@ -309,11 +309,12 @@ function isForeignFormattedBlock($, element) {
   const style = node.attr("style") || "";
 
   if (tagName === "pre") return true;
+
+  if (!/^(?:div|section|article|aside)$/i.test(tagName)) return false;
+
   if (/\b(?:hljs|highlight|codehilite|syntaxhighlighter|prettyprint)\b/i.test(className)) return true;
   if (/\blanguage-[\w-]+\b/i.test(className)) return true;
   if (/\bwhite-space\s*:\s*pre(?:-wrap)?\b/i.test(style)) return true;
-
-  if (!/^(?:div|section|article|aside)$/i.test(tagName)) return false;
 
   const hasComplexBoxStyle = (
     /(?:background(?:-color)?|border|display\s*:\s*(?:flex|grid)|font-family)\s*:/i.test(style)
