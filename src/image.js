@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const {downloadFirst, getFilenameFromUrl, getUniqueFilename} = require("./downloader");
+const {downloadFirst, getFilenameFromUrl} = require("./downloader");
 
 function decodeLegacyEucKr(value) {
   const source = String(value || "");
@@ -282,18 +282,6 @@ function replaceWithMissingImage(image) {
   }
 }
 
-function isCacheMissError(error) {
-  const message = String(error?.message || error || "");
-  if (!message) return false;
-
-  const lines = message.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const resultLines = lines.filter(line => line.includes("->"));
-
-  if (!resultLines.length) return message.includes("--no-download 이미지 캐시 없음:");
-
-  return resultLines.every(line => line.includes("--no-download 이미지 캐시 없음:"));
-}
-
 function getExistingFile(outputDir, filename) {
   if (!outputDir || !filename) return "";
 
@@ -309,78 +297,6 @@ function getExistingFile(outputDir, filename) {
   }
 
   return filename;
-}
-
-function getExistingFilenameCandidates(filename) {
-  const candidates = [];
-
-  function add(value) {
-    if (!value || candidates.includes(value)) return;
-    candidates.push(value);
-  }
-
-  add(filename);
-
-  const ext = path.extname(filename);
-
-  if (!ext) {
-    add(`${filename}.jpg`);
-    add(`${filename}.jpeg`);
-    add(`${filename}.png`);
-    add(`${filename}.webp`);
-    add(`${filename}.gif`);
-    add(`${filename}.bmp`);
-    add(`${filename}.svg`);
-    add(`${filename}.avif`);
-  }
-
-  if (ext.toLowerCase() === ".img") {
-    const base = path.basename(filename, ext);
-
-    add(`${base}.jpg`);
-    add(`${base}.jpeg`);
-    add(`${base}.png`);
-    add(`${base}.webp`);
-    add(`${base}.gif`);
-    add(`${base}.bmp`);
-    add(`${base}.svg`);
-    add(`${base}.avif`);
-  }
-
-  return candidates;
-}
-
-function getExistingImageFilename(outputDir, originalUrl, candidates, fallback) {
-  const filenameUrls = [];
-
-  function addFilenameUrl(value) {
-    const source = normalizeInputUrl(value);
-    if (!source || filenameUrls.includes(source)) return;
-    filenameUrls.push(source);
-  }
-
-  const nestedUrl = getNestedFilenameUrl(originalUrl);
-
-  addFilenameUrl(originalUrl);
-  addFilenameUrl(nestedUrl);
-
-  for (const candidate of candidates) addFilenameUrl(candidate);
-
-  for (const source of filenameUrls) {
-    const rawFilename = getFilenameFromUrl(source, "");
-    if (!rawFilename) continue;
-
-    const filename = safeFilename(rawFilename, fallback);
-    if (!filename) continue;
-
-    for (const candidateFilename of getExistingFilenameCandidates(filename)) {
-      const existingFilename = getExistingFile(outputDir, candidateFilename);
-
-      if (existingFilename) return existingFilename;
-    }
-  }
-
-  return "";
 }
 
 function getLocalImageFilename(image) {
@@ -503,18 +419,15 @@ function findPreviousImageByComponent($, image, root, previous$, previousRoot, o
   return getExistingFile(outputDir, filename);
 }
 
-function createImageManager(outputDir, managerOptions = {}) {
+function createImageManager(outputDir) {
   const cache = new Map();
   let fallbackIndex = 0;
-
-  const defaultNoDownload = Boolean(managerOptions.noDownload);
 
   async function downloadImage(url, options = {}) {
     const {
       highResolution = false,
       fallbackPrefix = "image",
       timeout = 1000,
-      noDownload = defaultNoDownload,
       previousFilename = "",
     } = options;
 
@@ -523,7 +436,7 @@ function createImageManager(outputDir, managerOptions = {}) {
 
     /*
      * previous original.html과 정확히 대응되고 원격 이미지 identity까지 같은 이미지가 있으면
-     * --no-download 여부와 관계없이 URL cache보다 먼저 기존 파일을 사용한다.
+     * URL cache보다 먼저 기존 파일을 사용한다.
      *
      * 같은 URL을 사용하는 여러 이미지가
      * image.png / image_2.png / image_3.png처럼 서로 다른 파일로 저장되어 있을 수 있으므로
@@ -560,46 +473,32 @@ function createImageManager(outputDir, managerOptions = {}) {
     let filename = safeFilename(getFilenameFromUrl(filenameSource, fallback), fallback);
     if (!path.extname(filename)) filename += ".img";
 
-    try {
-      const result = await downloadFirst(candidates, {
-        outputDir,
-        filename,
-        fallbackFilename: filename,
-        noDownload,
-        timeout,
-        logLabel: "이미지",
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          Referer: "https://blog.naver.com/",
-          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        },
-        validate: async (buffer, {contentType}) => {
-          if (!isImageBuffer(buffer, contentType)) {
-            throw new Error(`이미지가 아닌 응답: ${contentType || "unknown"}`);
-          }
-        },
-        resolveFilename: ({buffer, contentType}) => {
-          if (path.extname(filename).toLowerCase() !== ".img") return filename;
+    const result = await downloadFirst(candidates, {
+      outputDir,
+      filename,
+      fallbackFilename: filename,
+      timeout,
+      logLabel: "이미지",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Referer: "https://blog.naver.com/",
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      },
+      validate: async (buffer, {contentType}) => {
+        if (!isImageBuffer(buffer, contentType)) {
+          throw new Error(`이미지가 아닌 응답: ${contentType || "unknown"}`);
+        }
+      },
+      resolveFilename: ({buffer, contentType}) => {
+        if (path.extname(filename).toLowerCase() !== ".img") return filename;
 
-          const extension = getExtensionFromBuffer(buffer, contentType, ".jpg");
-          return `${path.basename(filename, ".img")}${extension}`;
-        },
-      });
+        const extension = getExtensionFromBuffer(buffer, contentType, ".jpg");
+        return `${path.basename(filename, ".img")}${extension}`;
+      },
+    });
 
-      cache.set(cacheKey, result.filename);
-      return result.filename;
-    } catch (error) {
-      if (!noDownload || !isCacheMissError(error)) throw error;
-
-      const existingFilename = getExistingImageFilename(outputDir, url, candidates, fallback);
-
-      if (!existingFilename) throw error;
-
-      console.log(`이미지 기존 파일 재사용: ${existingFilename}`);
-
-      cache.set(cacheKey, existingFilename);
-      return existingFilename;
-    }
+    cache.set(cacheKey, result.filename);
+    return result.filename;
   }
 
   return {
@@ -637,7 +536,6 @@ async function downloadFromImageSources(imageManager, sources, options) {
 async function localizeImages($, root, imageManager, options = {}) {
   const {
     editorVersion = 0,
-    noDownload = false,
     previous$ = null,
     previousRoot = null,
   } = options;
@@ -658,7 +556,7 @@ async function localizeImages($, root, imageManager, options = {}) {
     let previousFilename = "";
 
     /*
-     * previous original.html이 있으면 --no-download 여부와 관계없이 기존 이미지 재사용을 시도한다.
+     * previous original.html이 있으면 기존 이미지 재사용을 시도한다.
      *
      * findPreviousImageByComponent() 내부에서 현재/이전 이미지의 원격 URL identity를 비교하므로
      * 단순히 같은 위치에 있다는 이유만으로 다른 이미지를 잘못 재사용하지 않는다.
@@ -681,12 +579,9 @@ async function localizeImages($, root, imageManager, options = {}) {
         editorVersion,
         highResolution: !isOgImage,
         fallbackPrefix: isOgImage ? "og-thumb" : "image",
-        noDownload,
         previousFilename,
       });
     } catch (error) {
-      if (noDownload) throw error;
-
       console.warn(`이미지 다운로드 실패: ${sources.join(", ")}`);
       console.warn(error.message);
 

@@ -274,7 +274,7 @@ function findPreviousNaverVideo(previous$, previousRoot, vid, outputDir) {
 }
 
 async function localizeNaverVideos($, root, imageManager, options = {}) {
-  const {noDownload = false, previous$ = null, previousRoot = null} = options;
+  const {previous$ = null, previousRoot = null} = options;
 
   const selectors = [".se-component.se-video", ".se_video", ".se-video", "[data-module*='video']"];
   const elements = root.find(selectors.join(", ")).add(root.filter(selectors.join(", "))).toArray();
@@ -305,7 +305,7 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
     let result;
     let posterFilename = "";
 
-    if (noDownload && previous$ && previousRoot) {
+    if (previous$ && previousRoot) {
       for (const candidate of candidates) {
         const previous = findPreviousNaverVideo(previous$, previousRoot, candidate.vid, imageManager.outputDir);
         if (!previous) continue;
@@ -333,11 +333,8 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
         result = await downloadNaverVideo(candidates, {
           outputDir: imageManager.outputDir,
           fallbackFilename: `video-${String(components.indexOf(element) + 1).padStart(3, "0")}.mp4`,
-          noDownload,
         });
       } catch (error) {
-        if (noDownload) throw error;
-
         console.warn(`동영상 다운로드 실패: ${candidates[0]?.vid || "unknown"}`);
         console.warn(error.message);
         continue;
@@ -350,11 +347,8 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
           posterFilename = await imageManager.download(result.posterUrl, {
             fallbackPrefix: "video-thumb",
             highResolution: true,
-            noDownload,
           });
         } catch (error) {
-          if (noDownload) throw error;
-
           console.warn(`동영상 썸네일 다운로드 실패: ${result.posterUrl}`);
           console.warn(error.message);
         }

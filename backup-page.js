@@ -170,10 +170,9 @@ async function convertPost(blogId, logNo, options = {}) {
     title: suppliedTitle = "",
     includePrivate = false,
     update = false,
-    noDownload = false,
   } = options;
 
-  const useCache = update || noDownload;
+  const useCache = update;
 
   blogId = String(blogId);
   logNo = String(logNo);
@@ -240,25 +239,19 @@ async function convertPost(blogId, logNo, options = {}) {
    * 기존 리소스를 복사하지 않고 빈 temp에서 시작한다.
    * downloader의 캐시도 비활성화되므로 모든 리소스를 새로 다운로드한다.
    *
-   * --update / --no-download:
+   * --update:
    * 기존 게시글 폴더 전체를 temp로 복사한 다음
    * original.html / index.md만 삭제하고 다시 만든다.
    */
   let resourceSourceDir = "";
 
-  if (update || noDownload) {
+  if (update) {
     if (previousOutputDir && fs.existsSync(previousOutputDir)) {
       resourceSourceDir = previousOutputDir;
     } else if (fs.existsSync(finalOutputDir)) {
       resourceSourceDir = finalOutputDir;
     }
   }
-
-  if (noDownload && !resourceSourceDir) {
-    throw new Error(`--no-download 사용 불가: 게시글 ${logNo}의 기존 백업을 찾을 수 없습니다.`);
-  }
-
-  if (noDownload) console.log(`기존 리소스 재사용: ${path.relative(process.cwd(), resourceSourceDir)}`);
 
   const tempOutputDir = path.join(OUTPUT_ROOT, ".tmp", `${blogId}_${logNo}_${Date.now()}`);
 
@@ -288,7 +281,6 @@ async function convertPost(blogId, logNo, options = {}) {
       logNo,
       title,
       editorVersion,
-      noDownload,
       previousHtml,
     });
 
@@ -381,14 +373,13 @@ function parseArgs(argv) {
   const args = argv.slice(2);
   const includePrivate = args.includes("--private");
   const update = args.includes("--update");
-  const noDownload = args.includes("--no-download");
-  const positional = args.filter(arg => !["--private", "--update", "--no-download"].includes(arg));
+  const positional = args.filter(arg => !["--private", "--update"].includes(arg));
 
   if (!positional.length) {
-    throw new Error('사용법: npm run page -- "네이버 블로그 글 URL" [--private] [--update] [--no-download]');
+    throw new Error('사용법: npm run page -- "네이버 블로그 글 URL" [--private] [--update]');
   }
 
-  return {url: positional[0], includePrivate, update, noDownload};
+  return {url: positional[0], includePrivate, update};
 }
 
 async function main() {
@@ -407,10 +398,9 @@ async function main() {
     }
 
     await convertPost(blogId, logNo, {
-      skipUnchanged: args.update && !args.noDownload,
+      skipUnchanged: args.update,
       includePrivate,
       update: args.update,
-      noDownload: args.noDownload,
     });
   } catch (error) {
     console.error(error.message || error);

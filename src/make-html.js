@@ -141,7 +141,7 @@ function rewriteCssUrls(css, cssUrl) {
   });
 }
 
-async function downloadCss(info, outputDir, label, noDownload = false) {
+async function downloadCss(info, outputDir, label) {
   if (!info) return "";
 
   const url = normalizeUrl(info.url);
@@ -152,7 +152,6 @@ async function downloadCss(info, outputDir, label, noDownload = false) {
       outputDir,
       filename: info.filename,
       overwrite: true,
-      noDownload,
       logLabel: `${label} CSS`,
       headers: {"User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/"},
       transform: buffer => rewriteCssUrls(buffer.toString("utf8"), url),
@@ -160,48 +159,33 @@ async function downloadCss(info, outputDir, label, noDownload = false) {
 
     return result.filename;
   } catch (error) {
-    if (noDownload) {
-      const existingPath = path.join(outputDir, info.filename);
-
-      if (fs.existsSync(existingPath)) {
-        try {
-          if (fs.statSync(existingPath).isFile()) {
-            console.log(`${label} CSS 기존 파일 재사용: ${info.filename}`);
-            return info.filename;
-          }
-        } catch {}
-      }
-
-      throw error;
-    }
-
     console.warn(`${label} CSS 다운로드 실패: ${error.message}`);
     return "";
   }
 }
 
-async function downloadLayoutCss($, outputDir, noDownload = false) {
+async function downloadLayoutCss($, outputDir) {
   const info = getLayoutCssInfo($);
   if (!info) return "";
-  return downloadCss(info, outputDir, "블로그 레이아웃", noDownload);
+  return downloadCss(info, outputDir, "블로그 레이아웃");
 }
 
-async function downloadPostViewCss($, outputDir, editorVersion, noDownload = false) {
+async function downloadPostViewCss($, outputDir, editorVersion) {
   if (editorVersion !== 1 && editorVersion !== 2) return "";
 
   const info = getPostViewCssInfo($);
   if (!info) return "";
 
-  return downloadCss(info, outputDir, "PostView", noDownload);
+  return downloadCss(info, outputDir, "PostView");
 }
 
-async function downloadViewerCss($, outputDir, editorVersion, noDownload = false) {
+async function downloadViewerCss($, outputDir, editorVersion) {
   if (editorVersion !== 3 && editorVersion !== 4) return "";
 
   const info = getViewerCssInfo($, editorVersion);
   if (!info) return "";
 
-  return downloadCss(info, outputDir, `에디터 v${editorVersion}`, noDownload);
+  return downloadCss(info, outputDir, `에디터 v${editorVersion}`);
 }
 
 function getBodyAttributes($) {
@@ -357,12 +341,11 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   const bodyAttributes = getBodyAttributes($);
   const inlineHeadCss = getInlineHeadCss($);
   const archiveOverrideCss = getArchiveOverrideCss(editorVersion);
-  const noDownload = Boolean(options.noDownload);
   const previousHtml = String(options.previousHtml || "");
   let previous$ = null;
   let previousRoot = null;
 
-  if (noDownload && previousHtml) {
+  if (previousHtml) {
     previous$ = cheerio.load(previousHtml, {decodeEntities: false});
 
     try {
@@ -372,18 +355,18 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
     }
   }
 
-  const imageManager = createImageManager(outputDir, {noDownload});
+  const imageManager = createImageManager(outputDir);
 
   console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
 
   const wrappers = prepareWrapperPath(root, editorVersion);
-  const layoutCssFilename = await downloadLayoutCss($, outputDir, noDownload);
-  const postViewCssFilename = await downloadPostViewCss($, outputDir, editorVersion, noDownload);
-  const viewerCssFilename = await downloadViewerCss($, outputDir, editorVersion, noDownload);
+  const layoutCssFilename = await downloadLayoutCss($, outputDir);
+  const postViewCssFilename = await downloadPostViewCss($, outputDir, editorVersion);
+  const viewerCssFilename = await downloadViewerCss($, outputDir, editorVersion);
 
-  await localizeImages($, root, imageManager, {editorVersion, noDownload, previous$, previousRoot});
-  await localizeNaverVideos($, root, imageManager, {editorVersion, noDownload, previous$, previousRoot});
-  await localizeAttachments($, root, outputDir, {editorVersion, noDownload, previous$, previousRoot});
+  await localizeImages($, root, imageManager, {editorVersion, previous$, previousRoot});
+  await localizeNaverVideos($, root, imageManager, {editorVersion, previous$, previousRoot});
+  await localizeAttachments($, root, outputDir, {editorVersion, previous$, previousRoot});
 
   restoreYoutubeVideos($, root);
   cleanArchivedRoot($, root);

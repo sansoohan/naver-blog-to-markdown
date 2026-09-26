@@ -218,7 +218,6 @@ async function download(url, options = {}) {
   const {
     outputDir = "",
     fallbackFilename = "download",
-    noDownload = false,
     logLabel = "파일",
     overwrite = false,
     retries = 0,
@@ -229,7 +228,7 @@ async function download(url, options = {}) {
    *
    * ok    -> 네트워크 요청 없이 기존 파일 재사용
    * error -> 이전 실패이므로 네트워크 요청 금지
-   * miss  -> --no-download가 아니면 실제 다운로드
+   * miss  -> 실제 다운로드
    */
   const cached = getResourceState(source);
 
@@ -242,8 +241,6 @@ async function download(url, options = {}) {
   if (cached?.status === "error") {
     throw new Error(`이전 ${logLabel} 다운로드 실패로 재시도 안 함: ${source} - ${cached.error}`);
   }
-
-  if (noDownload) throw new Error(`--no-download ${logLabel} 캐시 없음: ${source}`);
 
   let fetched;
   let fetchError = null;
@@ -514,82 +511,10 @@ function reuseCachedVideo(cached, vid, metadata, outputDir) {
   };
 }
 
-function findExistingFile(outputDir, filename) {
-  if (!outputDir || !filename) return "";
-
-  const root = path.resolve(outputDir);
-  const filePath = path.resolve(root, filename);
-
-  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) return "";
-
-  try {
-    if (!fs.statSync(filePath).isFile()) return "";
-  } catch {
-    return "";
-  }
-
-  return filePath;
-}
-
-function findExistingVideoFromResolved(resolved, outputDir, fallbackFilename = "video.mp4") {
-  const {metadata, info, videoUrl, posterUrl} = resolved;
-  const vid = String(metadata?.vid || "").trim();
-
-  let fallback = safeFilename(fallbackFilename, "video.mp4");
-  if (!path.extname(fallback)) fallback += ".mp4";
-
-  let videoFilename = getFilenameFromUrl(videoUrl, fallback);
-  if (!path.extname(videoFilename)) videoFilename += ".mp4";
-
-  const videoPath = findExistingFile(outputDir, videoFilename);
-
-  if (!videoPath) {
-    throw new Error(`--no-download 기존 동영상 파일 없음: ${videoFilename}`);
-  }
-
-  let posterFilename = "";
-  let posterPath = "";
-
-  if (posterUrl) {
-    posterFilename = getFilenameFromUrl(posterUrl, "");
-
-    if (posterFilename) {
-      posterPath = findExistingFile(outputDir, posterFilename);
-
-      if (!posterPath) {
-        posterFilename = "";
-        posterPath = "";
-      }
-    }
-  }
-
-  setVideo(vid, videoPath, posterPath);
-
-  console.log(`동영상 기존 파일 재사용: ${videoFilename}`);
-
-  if (posterFilename) {
-    console.log(`동영상 썸네일 기존 파일 재사용: ${posterFilename}`);
-  }
-
-  return {
-    status: "existing",
-    cached: true,
-    vid,
-    metadata,
-    videoPath,
-    videoFilename,
-    posterPath,
-    posterFilename,
-    posterUrl: posterFilename ? "" : posterUrl,
-    info,
-  };
-}
-
 async function downloadNaverVideo(candidates, options = {}) {
   const {
     outputDir = "",
     fallbackFilename = "video.mp4",
-    noDownload = false,
   } = options;
 
   if (!Array.isArray(candidates) || !candidates.length) {
@@ -630,26 +555,12 @@ async function downloadNaverVideo(candidates, options = {}) {
 
   /*
    * vid cache miss일 때 VOD API를 호출한다.
-   *
-   * --no-download에서도 VOD API의 JSON 메타데이터 조회는 허용한다.
-   * 실제 MP4/poster 파일 다운로드는 하지 않는다.
    */
   try {
     resolved = await resolveNaverVideo(candidates);
   } catch (error) {
-    if (!noDownload) {
-      for (const vid of vids) setVideoError(vid, error);
-    }
-
+    for (const vid of vids) setVideoError(vid, error);
     throw error;
-  }
-
-  /*
-   * --no-download에서는 VOD API에서 얻은 URL로 파일명만 계산한 뒤
-   * 이미 outputDir에 복사되어 있는 기존 MP4/poster를 찾는다.
-   */
-  if (noDownload) {
-    return findExistingVideoFromResolved(resolved, outputDir, fallbackFilename);
   }
 
   const {metadata, info, videoUrl, posterUrl} = resolved;

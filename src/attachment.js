@@ -154,11 +154,10 @@ function isAttachmentLink(link, url) {
   return false;
 }
 
-async function downloadAttachment(url, downloadDir, preferredName, fallbackName, options = {}) {
+async function downloadAttachment(url, downloadDir, preferredName, fallbackName) {
   const result = await download(url, {
     outputDir: downloadDir,
     fallbackFilename: fallbackName,
-    noDownload: Boolean(options.noDownload),
     logLabel: "첨부파일",
     headers: {
       "User-Agent": "Mozilla/5.0",
@@ -283,18 +282,18 @@ function getVersion12AttachmentEntries($) {
   return entries;
 }
 
-async function getDownloadedAttachment(url, downloadDir, preferredName, fallbackName, downloaded, options = {}) {
+async function getDownloadedAttachment(url, downloadDir, preferredName, fallbackName, downloaded) {
   if (downloaded.has(url)) return downloaded.get(url);
 
   fs.mkdirSync(downloadDir, {recursive: true});
 
-  const filename = await downloadAttachment(url, downloadDir, preferredName, fallbackName, options);
+  const filename = await downloadAttachment(url, downloadDir, preferredName, fallbackName);
   downloaded.set(url, filename);
 
   return filename;
 }
 
-async function localizeVersion12Attachments($, root, downloadDir, downloaded, handledUrls, indexStart, options = {}) {
+async function localizeVersion12Attachments($, root, downloadDir, downloaded, handledUrls, indexStart) {
   const cards = [];
   let index = indexStart;
 
@@ -313,11 +312,9 @@ async function localizeVersion12Attachments($, root, downloadDir, downloaded, ha
         downloadDir,
         preferredName,
         fallbackName,
-        downloaded,
-        options
+        downloaded
       );
     } catch (error) {
-      if (options.noDownload) throw error;
       console.warn(`첨부파일 다운로드 실패: ${entry.url} - ${error.message}`);
       continue;
     }
@@ -333,7 +330,7 @@ async function localizeVersion12Attachments($, root, downloadDir, downloaded, ha
   return index;
 }
 
-async function localizeVersion34Attachments($, root, downloadDir, downloaded, handledUrls, options = {}) {
+async function localizeVersion34Attachments($, root, downloadDir, downloaded, handledUrls) {
   let index = 0;
 
   /*
@@ -362,11 +359,9 @@ async function localizeVersion34Attachments($, root, downloadDir, downloaded, ha
         downloadDir,
         preferredName,
         fallbackName,
-        downloaded,
-        options
+        downloaded
       );
     } catch (error) {
-      if (options.noDownload) throw error;
       console.warn(`첨부파일 다운로드 실패: ${url} - ${error.message}`);
       continue;
     }
@@ -437,204 +432,8 @@ function getLocalizedAttachment(link) {
   };
 }
 
-function getPreviousVersion12Attachments(previous$, previousRoot) {
-  if (!previous$ || !previousRoot) return [];
-
-  const group = previousRoot.find(".naver-version12-attachments").first();
-  if (!group.length) return [];
-
-  return group.find("a.naver-local-attachment").toArray()
-    .map(element => getLocalizedAttachment(previous$(element)))
-    .filter(Boolean);
-}
-
-function getPreviousVersion34Attachments(previous$, previousRoot) {
-  if (!previous$ || !previousRoot) return [];
-
-  return previousRoot.find("a.naver-local-attachment").toArray()
-    .filter(element => {
-      const link = previous$(element);
-      return !link.closest(".naver-version12-attachments").length;
-    })
-    .map(element => getLocalizedAttachment(previous$(element)))
-    .filter(Boolean);
-}
-
-function assertAttachmentFile(outputDir, item, index) {
-  const href = normalizeLocalPath(item?.href);
-
-  if (!/^\.\/download\//i.test(href)) {
-    throw new Error(`--no-download 첨부파일 재사용 실패: ${index}번째 로컬 경로가 없습니다.`);
-  }
-
-  let encodedFilename = href.replace(/^\.\/download\//i, "");
-
-  try {
-    encodedFilename = decodeURIComponent(encodedFilename);
-  } catch {}
-
-  const downloadDir = path.resolve(outputDir, "download");
-  const localPath = path.resolve(downloadDir, encodedFilename);
-
-  if (localPath !== downloadDir && !localPath.startsWith(`${downloadDir}${path.sep}`)) {
-    throw new Error(`--no-download 첨부파일 재사용 실패: 잘못된 경로 ${href}`);
-  }
-
-  if (!fs.existsSync(localPath)) {
-    throw new Error(`--no-download 첨부파일 재사용 실패: 파일 없음 ${encodedFilename}`);
-  }
-}
-
-function normalizeAttachmentSource(value) {
-  const source = String(value || "").replace(/&amp;/g, "&").trim();
-  if (!source) return "";
-
-  try {
-    const parsed = new URL(source, "https://blog.naver.com/");
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return source;
-  }
-}
-
-function findPreviousAttachment(url, name, previousItems, used) {
-  const source = normalizeAttachmentSource(url);
-  const safeName = safeFilename(name || "", "").toLowerCase();
-
-  for (let index = 0; index < previousItems.length; index++) {
-    if (used.has(index)) continue;
-    if (previousItems[index].source && normalizeAttachmentSource(previousItems[index].source) === source) return index;
-  }
-
-  if (safeName) {
-    for (let index = 0; index < previousItems.length; index++) {
-      if (used.has(index)) continue;
-      if (String(previousItems[index].filename || "").toLowerCase() === safeName) return index;
-    }
-  }
-
-  return -1;
-}
-
-function reuseVersion12Attachments($, root, outputDir, options = {}) {
-  const {previous$, previousRoot} = options;
-  const entries = getVersion12AttachmentEntries($);
-  const previousItems = getPreviousVersion12Attachments(previous$, previousRoot);
-  const used = new Set();
-  const cards = [];
-
-  for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index];
-    const fallbackName = `attachment-${String(index + 1).padStart(3, "0")}`;
-    const currentName = safeFilename(entry.name, fallbackName);
-    const matchedIndex = findPreviousAttachment(entry.url, currentName, previousItems, used);
-
-    if (matchedIndex < 0) {
-      throw new Error(
-        `--no-download 첨부파일 재사용 실패(v1·2): `
-        + `${index + 1}번째 파일과 일치하는 기존 파일을 찾지 못했습니다.`
-      );
-    }
-
-    const previousItem = previousItems[matchedIndex];
-    assertAttachmentFile(outputDir, previousItem, index + 1);
-
-    /*
-     * 파일 자체와 파일명은 기존 백업 것을 사용한다.
-     * 파일 크기는 새 원본에 값이 있으면 새 값을 사용하고,
-     * 없으면 기존 값을 유지한다.
-     */
-    const size = entry.size || previousItem.size || "";
-    cards.push(makeAttachmentCard(previousItem.filename, size, entry.url));
-    used.add(matchedIndex);
-  }
-
-  if (cards.length) root.prepend(`<div class="naver-version12-attachments">${cards.join("")}</div>`);
-  if (cards.length) console.log(`기존 첨부파일 재사용: ${cards.length}개`);
-}
-
-function getVersion34AttachmentLinks($, root) {
-  return root.find("a").toArray().filter(element => {
-    const link = $(element);
-    const url = getAttachmentUrl(link);
-
-    if (!isAttachmentLink(link, url)) return false;
-    if (/^(?:\.\/)?download\//i.test(url)) return false;
-
-    return true;
-  });
-}
-
-function reuseVersion34Attachments($, root, outputDir, options = {}) {
-  const {previous$, previousRoot} = options;
-  const links = getVersion34AttachmentLinks($, root);
-  const previousItems = getPreviousVersion34Attachments(previous$, previousRoot);
-  const used = new Set();
-
-  for (let index = 0; index < links.length; index++) {
-    const link = $(links[index]);
-    const url = getAttachmentUrl(link);
-    const currentName = getAttachmentName(link, url, index + 1);
-    const matchedIndex = findPreviousAttachment(url, currentName, previousItems, used);
-
-    if (matchedIndex < 0) {
-      throw new Error(
-        `--no-download 첨부파일 재사용 실패(v3·4): `
-        + `${index + 1}번째 파일과 일치하는 기존 파일을 찾지 못했습니다.`
-      );
-    }
-
-    const previousItem = previousItems[matchedIndex];
-    assertAttachmentFile(outputDir, previousItem, index + 1);
-
-    const currentSize = getAttachmentSize(link);
-    const size = currentSize || previousItem.size || "";
-    const card = makeAttachmentCard(previousItem.filename, size, url);
-    const component = link.closest(".se-component.se-file, .se-file");
-
-    if (component.length) component.replaceWith(card);
-    else link.replaceWith(card);
-
-    used.add(matchedIndex);
-  }
-
-  if (links.length) console.log(`기존 첨부파일 재사용: ${links.length}개`);
-}
-
-function reuseAttachments($, root, outputDir, options = {}) {
-  const editorVersion = Number(options.editorVersion) || 0;
-
-  if (!options.previous$ || !options.previousRoot) {
-    throw new Error("--no-download 첨부파일 재사용 실패: 기존 original.html이 없습니다.");
-  }
-
-  if (editorVersion === 1 || editorVersion === 2) {
-    reuseVersion12Attachments($, root, outputDir, options);
-    return;
-  }
-
-  if (editorVersion === 3 || editorVersion === 4) {
-    reuseVersion34Attachments($, root, outputDir, options);
-    return;
-  }
-
-  console.warn("첨부파일 재사용 건너뜀: 에디터 버전을 확인할 수 없습니다.");
-}
-
 async function localizeAttachments($, root, outputDir, options = {}) {
   const editorVersion = Number(options.editorVersion) || 0;
-
-  /*
-   * 이제 --no-download도 이전 HTML의 위치 대응을 먼저 쓰는 대신
-   * downloader의 영구 URL 캐시를 이용할 수 있다.
-   *
-   * 다만 기존 previous HTML 재사용 경로도 그대로 남겨둔다.
-   */
-  if (options.noDownload && options.previous$ && options.previousRoot) {
-    reuseAttachments($, root, outputDir, options);
-    return;
-  }
 
   const downloadDir = path.join(outputDir, "download");
   const downloaded = new Map();
@@ -648,7 +447,7 @@ async function localizeAttachments($, root, outputDir, options = {}) {
    * 본문 맨 위에 별도의 첨부파일 영역을 만든다.
    */
   if (editorVersion === 1 || editorVersion === 2) {
-    await localizeVersion12Attachments($, root, downloadDir, downloaded, handledUrls, 0, options);
+    await localizeVersion12Attachments($, root, downloadDir, downloaded, handledUrls, 0);
     return;
   }
 
@@ -662,7 +461,7 @@ async function localizeAttachments($, root, outputDir, options = {}) {
    * 그 위치에서 로컬 다운로드 카드로 교체한다.
    */
   if (editorVersion === 3 || editorVersion === 4) {
-    await localizeVersion34Attachments($, root, downloadDir, downloaded, handledUrls, options);
+    await localizeVersion34Attachments($, root, downloadDir, downloaded, handledUrls);
     return;
   }
 
