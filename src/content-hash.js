@@ -200,6 +200,63 @@ function createContentHash(root) {
   clone.find(".post-btn").remove();
 
   /*
+   * [해시 제외 - OG 링크 썸네일]
+   *
+   * 네이버 OG 링크 미리보기의 썸네일은 외부 이미지 로딩 상태에 따라
+   * 같은 게시글에서도 DOM 전체가 생성되거나 존재하지 않을 수 있다.
+   *
+   * 실제 확인된 차이:
+   *
+   *   정상 로딩:
+   *     <a class="se-oglink-thumbnail ...">
+   *       <img class="se-oglink-thumbnail-resource ...">
+   *     </a>
+   *
+   *   로딩 실패/미완료:
+   *     .se-oglink-thumbnail 자체가 존재하지 않음
+   *
+   * OG 링크의 실제 href, 제목, 요약, URL 정보는 .se-oglink-info에 별도로
+   * 존재하므로 썸네일 영역만 해시에서 제외한다.
+   *
+   * 중요:
+   * .se-component.se-oglink 전체를 제거하지 말 것.
+   * 실제 링크 주소나 제목 등의 콘텐츠가 변경되면 해시도 변경되어야 한다.
+   */
+  clone.find(".se-oglink-thumbnail").remove();
+
+  /*
+   * [해시 제외 - 네이버 이미지 렌더링 옵션]
+   *
+   * 네이버 이미지 URL의 type query parameter는 같은 원본 이미지에서도
+   * 페이지 로딩 상태에 따라 다른 값이 사용될 수 있다.
+   *
+   * 실제 확인된 차이:
+   *   ?type=w3
+   *   ?type=w80_blur
+   *
+   * 원본 이미지 경로는 그대로 유지하고 type parameter만 제거한다.
+   *
+   * 중요:
+   * src 전체를 제거하지 말 것.
+   * 실제 이미지 파일이 변경되면 해시도 변경되어야 한다.
+   */
+  clone.find("img[src]").each((_, element) => {
+    const $el = clone.find(element);
+    const src = $el.attr("src");
+
+    if (!src) return;
+
+    try {
+      const url = new URL(src, "https://blog.naver.com");
+
+      if (/\.pstatic\.net$/i.test(url.hostname)) {
+        url.searchParams.delete("type");
+        $el.attr("src", url.toString());
+      }
+    } catch {}
+  });
+
+  /*
    * [해시 제외 - URL의 일회성/동적 query parameter]
    *
    * 링크 자체는 실제 콘텐츠이므로 href 전체를 제거하지 않는다.
