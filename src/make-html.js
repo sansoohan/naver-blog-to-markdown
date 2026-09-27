@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const cheerio = require("cheerio");
-const {html: beautifyHtml} = require("js-beautify");
+const prettifyHtml = require("html-prettify");
 const {createImageManager, localizeImages} = require("./image");
 const {restoreYoutubeVideos, localizeNaverVideos} = require("./video");
 const {localizeAttachments} = require("./attachment");
@@ -316,14 +316,7 @@ function cleanArchivedRoot($, root) {
 }
 
 function beautifyArchivedHtml(html) {
-  return beautifyHtml(html, {
-    indent_size: 2,
-    indent_char: " ",
-    max_preserve_newlines: 1,
-    preserve_newlines: true,
-    wrap_line_length: 0,
-    end_with_newline: true,
-  });
+  return prettifyHtml(html);
 }
 
 function protectPostBody(html) {
