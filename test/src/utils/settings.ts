@@ -78,7 +78,11 @@ export function applyMarkdownSettings(
         color: #6ea8fe !important;
       }
 
-      pre,
+      pre {
+        background-color: #2b3035 !important;
+        color: #dee2e6 !important;
+      }
+
       code {
         color: #dee2e6 !important;
       }
