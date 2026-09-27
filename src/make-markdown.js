@@ -112,7 +112,7 @@ function getPostRoot($, editorVersion = 0) {
 function restoreEmptyLines(markdown) {
   return String(markdown).replace(/(?:NAVEREMPTYLINE\s*)+/g, match => {
     const count = (match.match(/NAVEREMPTYLINE/g) || []).length;
-    return Array(count).fill("<br>").join("\n");
+    return `${Array(count).fill("<br>").join("\n")}\n`;
   });
 }
 
@@ -133,18 +133,16 @@ function normalizeBreakSpacing(markdown) {
     while (index + count < lines.length && lines[index + count].trim().toLowerCase() === "<br>") count++;
 
     /*
-     * <br>이 3개 이상 연속되면 2개까지만 남긴다.
+     * 연속된 <br> 개수를 그대로 유지한다.
      */
-    const preservedCount = Math.min(count, 2);
-
-    for (let offset = 0; offset < preservedCount; offset++) result.push("<br>");
+    for (let offset = 0; offset < count; offset++) result.push("<br>");
 
     index += count - 1;
 
     /*
      * 마지막 <br> 아래에는 반드시 빈 줄을 하나 둔다.
      *
-     * 이미지, 목록, 표, 코드블록, 인용문 등 다음 Markdown 블록이
+     * 이미지, 목록, 표, 코드블록, 인용문, 제목 등 다음 Markdown 블록이
      * HTML 블록에 먹히지 않고 정상적으로 해석되게 하기 위한 처리다.
      */
     const nextLine = lines[index + 1];
@@ -417,6 +415,8 @@ function makeMarkdown(originalHtml, options = {}) {
   /*
    * 모든 placeholder가 실제 Markdown과 HTML로 복구된 다음
    * <br> 묶음 바로 아래에 빈 줄을 보장한다.
+   *
+   * <br> 개수 자체는 줄이지 않고 원본 개수 그대로 유지한다.
    */
   markdown = normalizeBreakSpacing(markdown);
   markdown = cleanMarkdown(markdown);

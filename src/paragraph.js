@@ -1,3 +1,5 @@
+const fontSizeRules = require("../font-size-rules.json");
+
 function escapeHtmlText(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -155,14 +157,22 @@ function hasMixedFontSizes(runs) {
   return new Set(meaningfulRuns(runs).map((run) => run.style.fontSize)).size > 1;
 }
 
+function isInFontSizeRange(size, range) {
+  return size >= range.min && size <= range.max;
+}
+
 function getHeadingLevel(size) {
-  if (size === 30) return 1;
-  if (size === 28) return 2;
-  if (size === 24) return 3;
-  if (size === 19) return 4;
-  if (size === 16) return 5;
-  if (size === 15) return 6;
-  return 0;
+  if (size === null) return 0;
+
+  const range = fontSizeRules.headingRanges.find((item) => isInFontSizeRange(size, item));
+
+  return range?.level || 0;
+}
+
+function isBodyFontSize(size) {
+  if (size === null) return false;
+
+  return fontSizeRules.bodyRanges.some((range) => isInFontSizeRange(size, range));
 }
 
 function parseCheckbox(runs) {
@@ -288,10 +298,23 @@ function shouldPreserveRunFontSize(run, context) {
   if (run.type !== "text" || run.style.fontSize === null) return false;
   if (context.heading) return false;
 
-  if (context.checkbox) return run.style.fontSize !== 13;
+  /*
+   * 서로 다른 폰트 크기가 한 문단에 섞여 있으면 Markdown heading으로
+   * 표현할 수 없으므로 각 run의 원래 크기를 그대로 보존한다.
+   */
   if (context.mixed) return true;
 
-  return [11, 34, 38].includes(run.style.fontSize);
+  /*
+   * 체크박스는 heading으로 변환하지 않는다.
+   * 본문 크기만 일반 텍스트로 처리하고 나머지는 실제 크기를 보존한다.
+   */
+  if (context.checkbox) return !isBodyFontSize(run.style.fontSize);
+
+  /*
+   * 단일 크기 문단에서 heading 범위는 이미 context.heading으로 처리됐다.
+   * 따라서 여기까지 왔다면 본문 범위 또는 커스텀 크기다.
+   */
+  return !isBodyFontSize(run.style.fontSize);
 }
 
 function stripLink(style) {
@@ -423,7 +446,7 @@ function renderParagraphHtml(node) {
 
     const rendered = group.runs.map((run) => {
       const style = stripLink(run.style);
-      const preserveFontSize = style.fontSize !== null && style.fontSize !== 13;
+      const preserveFontSize = style.fontSize !== null && !isBodyFontSize(style.fontSize);
 
       return renderHtmlFormatting(run.text, style, preserveFontSize);
     }).join("");

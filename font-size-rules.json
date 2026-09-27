@@ -1,0 +1,13 @@
+{
+  "headingRanges": [
+    { "min": 8, "max": 9, "level": 6 },
+    { "min": 10, "max": 11, "level": 5 },
+    { "min": 15, "max": 17, "level": 3 },
+    { "min": 18, "max": 24, "level": 2 },
+    { "min": 25, "max": 34, "level": 1 }
+  ],
+  "bodyRanges": [
+    { "min": 12, "max": 14 }
+  ],
+  "default": "custom"
+}
