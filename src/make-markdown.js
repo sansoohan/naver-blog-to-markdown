@@ -323,7 +323,8 @@ function protectOgCards($, root, store) {
     const image = component.find("img").first();
     const imageFailed = image.attr("data-download-error") === "true";
     const imageSrc = imageFailed ? "" : image.attr("src") || "";
-    const isLarge = component.find(".thumb.b_size").length > 0;
+    const isLarge = component.hasClass("se-l-large_image")
+      || component.find(".se-l-large_image,.thumb.b_size").length > 0;
 
     const text = [
       title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
@@ -345,8 +346,8 @@ function protectOgCards($, root, store) {
     }
 
     const html = isLarge
-      ? `<div class="naver-og-card-large" style="border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`
-      : `<div style="display:flex;gap:12px;align-items:center;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`;
+      ? `<div class="naver-og-card-large" style="width:100%;max-width:450px;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`
+      : `<div style="display:flex;width:100%;max-width:450px;gap:12px;align-items:center;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`;
 
     component.replaceWith(
       `<div class="naver-protected">${store.add(html)}</div>`
