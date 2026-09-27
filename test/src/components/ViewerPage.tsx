@@ -21,7 +21,7 @@ type ViewerPageProps = {
 
 function ViewerPage({ posts, postId }: ViewerPageProps) {
   const navigate = useNavigate();
-  const { removeParagraphMargins, darkMode } = useAppSettings();
+  const { removeParagraphMargins, darkMode, fancyCheckboxes } = useAppSettings();
   const [refreshKey, setRefreshKey] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [originalLoaded, setOriginalLoaded] = useState(false);
@@ -131,9 +131,9 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     }
 
     if (markdownDocument) {
-      applyMarkdownSettings(markdownDocument, markdownZoom, removeParagraphMargins, darkMode);
+      applyMarkdownSettings(markdownDocument, markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes);
     }
-  }, [markdownZoom, removeParagraphMargins, darkMode, currentPost?.id, refreshKey]);
+  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, currentPost?.id, refreshKey]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -295,7 +295,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
 
                   if (!document) return;
 
-                  applyMarkdownSettings(document, markdownZoom, removeParagraphMargins, darkMode);
+                  applyMarkdownSettings(document, markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes);
                   setMarkdownLoaded(true);
                 }}
               />

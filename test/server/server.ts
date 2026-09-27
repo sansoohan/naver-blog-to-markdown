@@ -2,8 +2,8 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import MarkdownIt from "markdown-it";
 import { scanPosts } from "./src/post-scanner.js";
+import markdown from "./src/markdown/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,11 +14,6 @@ const OUTPUT_ROOT = path.join(PROJECT_ROOT, "output");
 const PORT = 3001;
 
 const app = express();
-const markdown = new MarkdownIt({
-  html: true,
-  linkify: true,
-});
-
 app.use(express.json());
 
 /*

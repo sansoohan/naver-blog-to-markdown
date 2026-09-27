@@ -1,5 +1,6 @@
 export const REMOVE_PARAGRAPH_MARGINS_KEY = "removeParagraphMargins";
 export const DARK_MODE_KEY = "darkMode";
+export const FANCY_CHECKBOXES_KEY = "fancyCheckboxes";
 
 export function getBooleanSetting(key: string, defaultValue: boolean) {
   const saved = localStorage.getItem(key);
@@ -45,6 +46,7 @@ export function applyMarkdownSettings(
   markdownZoom: number,
   removeParagraphMargins: boolean,
   darkMode: boolean,
+  fancyCheckboxes: boolean,
 ) {
   document.documentElement.style.zoom = `${markdownZoom}%`;
 
@@ -79,6 +81,44 @@ export function applyMarkdownSettings(
       pre,
       code {
         color: #dee2e6 !important;
+      }
+    `);
+  }
+
+  if (fancyCheckboxes) {
+    rules.push(`
+      .task-list-item-checkbox {
+        appearance: none;
+        position: relative;
+        width: 18px;
+        height: 18px;
+        margin: 0 7px 0 0;
+        border: 2px solid #adb5bd;
+        border-radius: 5px;
+        background-color: transparent;
+        vertical-align: -3px;
+        transition:
+          background-color 0.15s ease,
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+
+      .task-list-item-checkbox:checked {
+        border-color: #20a464;
+        background-color: #20a464;
+        box-shadow: 0 0 0 2px rgba(32, 164, 100, 0.15);
+      }
+
+      .task-list-item-checkbox:checked::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 5px;
+        height: 9px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: translate(-50%, -60%) rotate(45deg);
       }
     `);
   }

@@ -6,7 +6,14 @@ type SettingsModalProps = {
 };
 
 function SettingsModal({ show, onClose }: SettingsModalProps) {
-  const { removeParagraphMargins, darkMode, setRemoveParagraphMargins, setDarkMode } = useAppSettings();
+  const {
+    removeParagraphMargins,
+    darkMode,
+    fancyCheckboxes,
+    setRemoveParagraphMargins,
+    setDarkMode,
+    setFancyCheckboxes,
+  } = useAppSettings();
 
   if (!show) return null;
 
@@ -32,6 +39,20 @@ function SettingsModal({ show, onClose }: SettingsModalProps) {
 
                 <label className="form-check-label" htmlFor="removeParagraphMargins">
                   문단 여백 제거
+                </label>
+              </div>
+
+              <div className="form-check mb-3">
+                <input
+                  id="fancyCheckboxes"
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={fancyCheckboxes}
+                  onChange={event => setFancyCheckboxes(event.target.checked)}
+                />
+
+                <label className="form-check-label" htmlFor="fancyCheckboxes">
+                  멋진 체크박스
                 </label>
               </div>
 
