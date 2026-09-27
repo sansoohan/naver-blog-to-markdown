@@ -26,10 +26,26 @@ function getNaverFontSize(node) {
 
   const className = node.attribs?.class || "";
 
+  /*
+   * SmartEditor 3.x 이상
+   */
   if (/(?:^|\s)se-fs-(?:\s|$)/.test(className)) return 15;
 
-  const match = className.match(/(?:^|\s)se-fs-fs(\d+)(?:\s|$)/);
-  return match ? Number(match[1]) : null;
+  const classMatch = className.match(/(?:^|\s)se-fs-fs(\d+)(?:\s|$)/);
+
+  if (classMatch) return Number(classMatch[1]);
+
+  /*
+   * SmartEditor 1.x / 2.x
+   *
+   * 실제 px 값이 명시된 경우에만 사용한다.
+   * <font size="2"> 같은 구형 HTML size 속성은 추정하지 않는다.
+   */
+  const css = node.attribs?.style || "";
+  const styleSize = getStyleProperty(css, "font-size");
+  const styleMatch = styleSize.match(/^(\d+(?:\.\d+)?)px$/i);
+
+  return styleMatch ? Number(styleMatch[1]) : null;
 }
 
 function createStyleState() {
@@ -96,10 +112,10 @@ function collectStyleRuns(node, inherited = createStyleState(), runs = []) {
 
   const state = cloneStyle(inherited);
 
-  if (name === "span") {
+  if (name === "span" || name === "font") {
     const size = getNaverFontSize(node);
     const css = node.attribs?.style || "";
-    const color = getStyleProperty(css, "color");
+    const color = getStyleProperty(css, "color") || node.attribs?.color || "";
     const backgroundColor = getStyleProperty(css, "background-color");
 
     if (size !== null) state.fontSize = size;
