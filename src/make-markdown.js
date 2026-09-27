@@ -166,6 +166,68 @@ function escapeMarkdownAlt(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
 }
 
+function getImageRenderWidth(image) {
+  /*
+   * SmartEditor 3.x 이상:
+   * 실제 이미지 표시 폭은 img가 아니라
+   * 부모 .se-section-image의 max-width에 저장되는 경우가 있다.
+   */
+  const section = image.closest(".se-section-image");
+
+  if (section.length) {
+    const sectionStyle = section.attr("style") || "";
+    const sectionMatch = sectionStyle.match(/max-width\s*:\s*(\d+(?:\.\d+)?)px/i);
+
+    if (sectionMatch) {
+      const width = Math.round(Number(sectionMatch[1]));
+
+      if (width > 0) return width;
+    }
+  }
+
+  /*
+   * SmartEditor 1.x / 2.x:
+   * style="width:550px" 형태로 실제 표시 폭이 저장되는 경우가 있다.
+   */
+  const style = image.attr("style") || "";
+  const styleMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i);
+
+  if (styleMatch) {
+    const width = Math.round(Number(styleMatch[1]));
+
+    if (width > 0) return width;
+  }
+
+  /*
+   * 마지막으로 data-width 또는 width attribute를 사용한다.
+   */
+  const attributeWidth = Number(image.attr("data-width") || image.attr("width"));
+
+  return Number.isFinite(attributeWidth) && attributeWidth > 0
+    ? Math.round(attributeWidth)
+    : 0;
+}
+
+function makeImageMarkdown(image) {
+  const src = image.attr("src") || "";
+  if (!src) return "";
+
+  const alt = image.attr("alt") || "";
+  const width = getImageRenderWidth(image);
+
+  /*
+   * 렌더링 폭이 저장되어 있으면 표준 Markdown 이미지 문법으로는
+   * 크기를 표현할 수 없으므로 HTML img로 보존한다.
+   */
+  if (width) {
+    return `<img src="${escapeHtmlAttribute(src)}"`
+      + `${alt ? ` alt="${escapeHtmlAttribute(alt)}"` : ""}`
+      + ` style="width:${width}px;max-width:100%;height:auto;">`;
+  }
+
+  return `![${escapeMarkdownAlt(alt)}](${src})`;
+}
+
 function protectMissingImages($, root, store) {
   const components = root.find(".se-component.se-image").toArray();
 
@@ -213,13 +275,9 @@ function protectImages($, root, store) {
     const parts = [];
 
     for (const imageElement of images) {
-      const image = $(imageElement);
-      const src = image.attr("src") || "";
+      const markdown = makeImageMarkdown($(imageElement));
 
-      if (!src) continue;
-
-      const alt = escapeMarkdownAlt(image.attr("alt") || "");
-      parts.push(`![${alt}](${src})`);
+      if (markdown) parts.push(markdown);
     }
 
     if (!parts.length) continue;
@@ -234,11 +292,8 @@ function protectStandaloneImages($, root, store) {
 
     if (image.closest(".naver-protected").length) return;
 
-    const src = image.attr("src") || "";
-    if (!src) return;
-
-    const alt = escapeMarkdownAlt(image.attr("alt") || "");
-    const markdown = `![${alt}](${src})`;
+    const markdown = makeImageMarkdown(image);
+    if (!markdown) return;
 
     image.replaceWith(`<div class="naver-protected">${store.add(markdown)}</div>`);
   });
