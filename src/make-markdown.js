@@ -214,15 +214,18 @@ function makeImageMarkdown(image) {
 
   const alt = image.attr("alt") || "";
   const width = getImageRenderWidth(image);
+  const isLegacyImage = image.hasClass("_photoImage");
 
   /*
    * 렌더링 폭이 저장되어 있으면 표준 Markdown 이미지 문법으로는
    * 크기를 표현할 수 없으므로 HTML img로 보존한다.
+   *
+   * 구형 네이버 이미지(_photoImage)는 각각 한 줄씩 표시한다.
    */
-  if (width) {
+  if (width || isLegacyImage) {
     return `<img src="${escapeHtmlAttribute(src)}"`
       + `${alt ? ` alt="${escapeHtmlAttribute(alt)}"` : ""}`
-      + ` style="width:${width}px;max-width:100%;height:auto;">`;
+      + ` style="${isLegacyImage ? "display:block;" : ""}${width ? `width:${width}px;` : ""}max-width:100%;height:auto;">`;
   }
 
   return `![${escapeMarkdownAlt(alt)}](${src})`;
@@ -381,6 +384,9 @@ function isForeignFormattedBlock($, element) {
   const tagName = String(element.tagName || "").toLowerCase();
   const className = node.attr("class") || "";
   const style = node.attr("style") || "";
+
+  // 네이버 구형 에디터 본문은 외부 서식 블록이 아니다.
+  if (node.hasClass("view")) return false;
 
   if (tagName === "pre") return true;
 
