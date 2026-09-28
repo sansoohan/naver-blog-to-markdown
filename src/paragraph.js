@@ -581,6 +581,22 @@ function getLegacyParagraphIndent(paragraph) {
   return "&nbsp;".repeat(spaces);
 }
 
+function protectLegacyAutosourcingBlocks($, root, store) {
+  const blocks = root.find(".autosourcing-stub-saved").toArray();
+
+  for (const element of blocks) {
+    const block = $(element);
+
+    if (block.closest(".naver-protected").length) continue;
+
+    const rendered = renderParagraph(element);
+    const value = rendered.empty ? "NAVEREMPTYLINE" : rendered.text;
+    const token = store.add(value);
+
+    block.replaceWith(`<div class="naver-protected">${token}</div>`);
+  }
+}
+
 /*
  * SmartEditor 1/2의 구형 본문은 SmartEditor 3/4처럼
  * .se-component.se-text / p.se-text-paragraph 구조를 사용하지 않고
@@ -652,6 +668,11 @@ function protectTextComponents($, root, store) {
 
     $(element).replaceWith(`<div class="naver-protected">${token}</div>`);
   });
+
+  /*
+   * SmartEditor 1/2 구형 autosourcing 블록 처리.
+   */
+  protectLegacyAutosourcingBlocks($, root, store);
 
   /*
    * SmartEditor 1/2 구형 일반 <p> 처리.
