@@ -503,16 +503,16 @@ function renderParagraphHtml(node) {
   return `${escapeHtmlText(`${checkbox.indent}- [${checkbox.checked}] `)}${content}`;
 }
 
-function renderTextList($, list, depth = 0) {
+function renderTextList($, list, indentSize = 0) {
   const lines = [];
   const tagName = String(list[0]?.tagName || list[0]?.name || "").toLowerCase();
   const ordered = tagName === "ol";
   const items = list.children("li").toArray();
+  const indent = " ".repeat(indentSize);
 
   for (let index = 0; index < items.length; index++) {
     const item = $(items[index]);
     const paragraphs = item.children("p.se-text-paragraph").toArray();
-    const indent = "  ".repeat(depth);
     const marker = ordered ? `${index + 1}.` : "-";
 
     const contents = paragraphs.map((paragraph) => {
@@ -524,9 +524,10 @@ function renderTextList($, list, depth = 0) {
     lines.push(`${indent}${marker}${content ? ` ${content}` : ""}`);
 
     const childLists = item.children("ul.se-text-list,ol.se-text-list").toArray();
+    const childIndentSize = indentSize + (ordered ? 4 : 2);
 
     for (const childList of childLists) {
-      const nested = renderTextList($, $(childList), depth + 1);
+      const nested = renderTextList($, $(childList), childIndentSize);
       if (nested) lines.push(nested);
     }
   }
