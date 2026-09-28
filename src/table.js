@@ -294,12 +294,330 @@ function getCellHeight(cell) {
 
 function getCellBackgroundColor(cell) {
   const style = cell.attr("style") || "";
-  const match = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
 
-  return match ? match[1].trim() : "";
+  /*
+   * 1. background-color
+   */
+  const backgroundColorMatch = style.match(
+    /(?:^|;)\s*background-color\s*:\s*([^;]+)/i
+  );
+
+  if (backgroundColorMatch) {
+    return backgroundColorMatch[1].trim();
+  }
+
+  /*
+   * 2. 구형 HTML bgcolor
+   */
+  const bgcolor = cell.attr("bgcolor");
+
+  if (bgcolor) {
+    return String(bgcolor).trim();
+  }
+
+  /*
+   * 3. background shorthand
+   *
+   * 단순 색상값만 안전하게 가져온다.
+   */
+  const backgroundMatch = style.match(
+    /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
+  );
+
+  if (backgroundMatch) {
+    return backgroundMatch[1].trim();
+  }
+
+  return "";
+}
+
+function getActualText(node) {
+  return node
+    .text()
+    .replace(/\u200b/g, "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+function normalizeStyleColor(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+/*
+ * 표 안에 background-color가 지정된 셀이
+ * 하나라도 있는지 검사한다.
+ */
+function hasAnyCellBackgroundColor($, table) {
+  return table.find("th, td").toArray().some((element) => {
+    return Boolean(getCellBackgroundColor($(element)));
+  });
+}
+
+/*
+ * 셀 배경색 처리는 투명화 판정보다 먼저 한다.
+ *
+ * 표 안에 background-color가 지정된 셀이 하나라도 있으면
+ * 배경색이 지정되지 않은 나머지 셀을 #ffffff로 채운다.
+ *
+ * 모든 셀이 배경색 미지정이라면 아무것도 하지 않는다.
+ */
+function fillMissingCellBackgrounds($, table) {
+  if (!hasAnyCellBackgroundColor($, table)) return;
+
+  table.find("th, td").each((_, element) => {
+    const cell = $(element);
+
+    if (getCellBackgroundColor(cell)) return;
+
+    const style = cell.attr("style") || "";
+
+    cell.attr(
+      "style",
+      `${style}${style.trim() && !style.trim().endsWith(";") ? ";" : ""}background-color:#ffffff;`
+    );
+  });
+}
+
+function shouldMakeTableTransparent($, table) {
+  /*
+   * 1단계:
+   *
+   * 셀 배경색부터 처리한다.
+   *
+   * 일부 셀에만 배경색이 있으면
+   * 나머지 미지정 셀을 먼저 흰색으로 채운다.
+   */
+  fillMissingCellBackgrounds($, table);
+
+  /*
+   * 2단계:
+   *
+   * 보정이 끝난 셀들의 배경색을 검사한다.
+   */
+  const cellBackgroundColors = new Set();
+
+  table.find("th, td").each((_, element) => {
+    const cell = $(element);
+    const backgroundColor = getCellBackgroundColor(cell);
+
+    cellBackgroundColors.add(
+      backgroundColor
+        ? normalizeStyleColor(backgroundColor)
+        : "__none__"
+    );
+  });
+
+  /*
+   * 3단계:
+   *
+   * 아래에서 글자 서식을 검사한다.
+   */
+  const fontColors = new Set();
+  let hasTextBackgroundColor = false;
+
+  /*
+   * td / th / p / div 같은 부모 요소의 background-color를
+   * 글자 배경색으로 오인하지 않는다.
+   *
+   * 실제 글자가 있는 span만 검사한다.
+   */
+  table.find("span").each((_, element) => {
+    const node = $(element);
+
+    if (!getActualText(node)) return;
+
+    const style = node.attr("style") || "";
+
+    const colorMatch = style.match(
+      /(?:^|;)\s*color\s*:\s*([^;]+)/i
+    );
+
+    if (colorMatch) {
+      fontColors.add(
+        normalizeStyleColor(colorMatch[1])
+      );
+    }
+
+    /*
+     * 실제 글자 span 자체에 background-color가 있으면
+     * 투명화하지 않는다.
+     */
+    if (
+      /(?:^|;)\s*background-color\s*:\s*[^;]+/i.test(style)
+    ) {
+      hasTextBackgroundColor = true;
+    }
+  });
+
+  /*
+   * 구형 HTML의 <font color="...">도
+   * 폰트색 판정에 포함한다.
+   */
+  table.find("font[color]").each((_, element) => {
+    const node = $(element);
+
+    if (!getActualText(node)) return;
+
+    const color = node.attr("color");
+
+    if (color) {
+      fontColors.add(
+        normalizeStyleColor(color)
+      );
+    }
+  });
+
+  /*
+   * 최종 조건:
+   *
+   * 1. 보정 후 모든 셀의 배경색이 동일함
+   * 2. 지정된 폰트색이 없거나 전부 동일함
+   * 3. 실제 글자 자체에 배경색이 하나도 없음
+   */
+  return cellBackgroundColors.size <= 1
+    && fontColors.size <= 1
+    && !hasTextBackgroundColor;
+}
+
+/*
+ * 투명화 조건을 만족한 구형 HTML 표의
+ * 고정 서식을 제거한다.
+ *
+ * - table / cell 배경 제거
+ * - table / cell border 제거
+ * - 동일한 font color 제거
+ */
+function makeTableBackgroundTransparent($, table) {
+  table.find("th, td").each((_, element) => {
+    const cell = $(element);
+    const style = cell.attr("style") || "";
+
+    let nextStyle = style
+      .replace(
+        /(?:^|;)\s*background-color\s*:\s*[^;]+/ig,
+        ""
+      )
+      .replace(
+        /(?:^|;)\s*background\s*:\s*[^;]+/ig,
+        ""
+      )
+      .replace(
+        /(?:^|;)\s*border(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+/ig,
+        ""
+      );
+
+    nextStyle = nextStyle.trim();
+
+    cell.attr(
+      "style",
+      `${nextStyle}${nextStyle && !nextStyle.endsWith(";") ? ";" : ""}background-color:transparent;`
+    );
+
+    cell.removeAttr("bgcolor");
+    cell.removeAttr("border");
+  });
+
+  /*
+   * 실제 텍스트가 있는 span에서
+   * 동일한 고정 폰트색을 제거한다.
+   */
+  table.find("span[style]").each((_, element) => {
+    const node = $(element);
+
+    if (!getActualText(node)) return;
+
+    const style = node.attr("style") || "";
+
+    let nextStyle = style.replace(
+      /(?:^|;)\s*color\s*:\s*[^;]+/ig,
+      ""
+    );
+
+    nextStyle = nextStyle.trim();
+
+    if (nextStyle) {
+      node.attr("style", nextStyle);
+    } else {
+      node.removeAttr("style");
+    }
+  });
+
+  /*
+   * 구형 <font color="..."> 제거.
+   */
+  table.find("font[color]").each((_, element) => {
+    const node = $(element);
+
+    if (!getActualText(node)) return;
+
+    node.removeAttr("color");
+  });
+
+  /*
+   * table 자체의 배경과 border도 제거한다.
+   */
+  const style = table.attr("style") || "";
+
+  let nextStyle = style
+    .replace(
+      /(?:^|;)\s*background-color\s*:\s*[^;]+/ig,
+      ""
+    )
+    .replace(
+      /(?:^|;)\s*background\s*:\s*[^;]+/ig,
+      ""
+    )
+    .replace(
+      /(?:^|;)\s*border(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+/ig,
+      ""
+    );
+
+  nextStyle = nextStyle.trim();
+
+  table.attr(
+    "style",
+    `${nextStyle}${nextStyle && !nextStyle.endsWith(";") ? ";" : ""}background:transparent;`
+  );
+
+  table.removeAttr("bgcolor");
+  table.removeAttr("border");
+}
+
+function hasCellFontStyle(cell) {
+  return cell.find("[style]").toArray().some((element) => {
+    const style = cell.find(element).attr("style") || "";
+
+    return /(?:^|;)\s*(?:color|background-color)\s*:\s*[^;]+/i.test(style);
+  });
+}
+
+function isWhiteBackground(color) {
+  const value = String(color || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+
+  return value === "#fff"
+    || value === "#ffffff"
+    || value === "white"
+    || value === "rgb(255,255,255)"
+    || value === "rgba(255,255,255,1)"
+    || value === "rgba(255,255,255,1.0)";
 }
 
 function renderComplexTable($, table) {
+  /*
+   * shouldMakeTableTransparent 안에서
+   * 미지정 셀의 배경색 보정이 먼저 실행된다.
+   *
+   * 따라서 아래에서 읽는 backgroundColor는
+   * 이미 보정이 끝난 상태다.
+   */
+  const transparentTable = shouldMakeTableTransparent($, table);
+
   const columnCount = getColumnCount($, table);
   const widths = getColumnWidths($, table, columnCount);
 
@@ -323,11 +641,29 @@ function renderComplexTable($, table) {
       const height = getCellHeight(cell);
       const heightStyle = height ? `height:${height};` : "";
       const backgroundColor = getCellBackgroundColor(cell);
-      const backgroundStyle = backgroundColor
-        ? `background-color:${backgroundColor};`
-        : "background:transparent;";
 
-      attrs += ` style="border:1px solid #d0d7de;padding:6px 10px;${heightStyle}${backgroundStyle}vertical-align:top;"`;
+      /*
+       * 투명화 조건 통과:
+       * → 셀 배경 투명
+       *
+       * 투명화 조건 실패:
+       * → 위에서 보정된 실제 셀 배경색 사용
+       */
+      const backgroundStyle = transparentTable
+        ? "background:transparent;"
+        : backgroundColor
+          ? `background-color:${backgroundColor};`
+          : "background:transparent;";
+
+      /*
+       * 투명화 조건을 만족한 신형 표는
+       * border도 생성하지 않는다.
+       */
+      const borderStyle = transparentTable
+        ? ""
+        : "border:1px solid #d0d7de;";
+
+      attrs += ` style="${borderStyle}padding:6px 10px;${heightStyle}${backgroundStyle}vertical-align:top;"`;
 
       html += `<${tag}${attrs}>${renderHtmlCell(cell)}</${tag}>`;
     }
@@ -467,9 +803,6 @@ function getLegacyColumnWidths(grid) {
    * 2단계:
    * colspan 셀의 폭에서 이미 알고 있는 열 폭을 빼고,
    * 아직 모르는 열에 나누어 배분한다.
-   *
-   * 여러 번 반복하면
-   * 일부 열만 알고 있는 colspan도 점차 풀 수 있다.
    */
   let changed = true;
 
@@ -618,9 +951,6 @@ function normalizeLegacyTableWidths($, table) {
 
   /*
    * 표 자체는 Markdown 뷰어의 가용 폭을 사용한다.
-   *
-   * 원본 셀들의 비율은 위에서 %로 변환했으므로
-   * 표 크기가 달라져도 열 비율은 유지된다.
    */
   const style = table.attr("style") || "";
 
@@ -664,8 +994,6 @@ table.naver-legacy-table p {
 function protectTables($, root, store) {
   /*
    * SmartEditor 3/4 신형 표.
-   *
-   * 기존 처리 그대로 유지한다.
    */
   root.find(".se-component.se-table").each((_, element) => {
     const component = $(element);
@@ -684,8 +1012,6 @@ function protectTables($, root, store) {
 
   /*
    * SmartEditor 1/2 구형 표.
-   *
-   * 표를 새로 만들지 않고 원본 table HTML을 그대로 보존한다.
    */
   let legacyTableStyleAdded = false;
 
@@ -694,8 +1020,6 @@ function protectTables($, root, store) {
 
     /*
      * 실제 게시글 본문 안의 표만 처리한다.
-     *
-     * printPost1 같은 네이버 페이지 레이아웃용 표는 제외한다.
      */
     if (!table.closest(".post-view").length) return;
     if (table.closest(".naver-protected").length) return;
@@ -703,6 +1027,21 @@ function protectTables($, root, store) {
     const cloned = table.clone();
 
     cloned.addClass("naver-legacy-table");
+
+    /*
+     * shouldMakeTableTransparent() 내부에서
+     *
+     * 1. 셀 배경색 보정
+     * 2. 보정된 셀 배경색 비교
+     * 3. 폰트색 / 글자 배경 검사
+     *
+     * 순서로 처리한다.
+     *
+     * 조건을 통과하면 그때 전체 투명화한다.
+     */
+    if (shouldMakeTableTransparent($, cloned)) {
+      makeTableBackgroundTransparent($, cloned);
+    }
 
     /*
      * 구형 표의 절대 폭을
