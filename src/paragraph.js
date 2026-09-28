@@ -435,7 +435,9 @@ function renderGroups(runs, context) {
 }
 
 function preserveMultipleSpaces(text) {
-  return String(text).replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
+  return String(text)
+    .replace(/^ +/g, spaces => "&nbsp;".repeat(spaces.length))
+    .replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
 }
 
 function renderParagraph(node) {
