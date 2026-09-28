@@ -79,8 +79,8 @@ function getDataJsonObjects(element) {
 function getNaverVideoMetadata(element) {
   const objects = getDataJsonObjects(element);
 
-  let vid = getAttributeValue(element, ["data-vid", "data-video-id", "data-videoid", "data-vod-id", "data-vodid"]);
-  let inKey = getAttributeValue(element, ["data-inkey", "data-in-key", "data-video-key", "data-videokey"]);
+  let vid = getAttributeValue(element, ["data-vid", "data-video-id", "data-videoid", "data-vod-id", "data-vodid", "vid"]);
+  let inKey = getAttributeValue(element, ["data-inkey", "data-in-key", "data-video-key", "data-videokey", "key"]);
   let thumbnail = getAttributeValue(element, ["data-thumbnail", "data-thumbnail-url", "data-poster", "data-poster-url"]);
   let width = getAttributeValue(element, ["data-width", "width"]);
   let height = getAttributeValue(element, ["data-height", "height"]);
@@ -90,9 +90,7 @@ function getNaverVideoMetadata(element) {
     if (!inKey) inKey = findObjectValue(object, ["inKey", "inkey", "in_key", "videoKey", "video_key"]);
 
     if (!thumbnail) {
-      thumbnail = findObjectValue(object, [
-        "thumbnail", "thumbnailUrl", "thumbnail_url", "poster", "posterUrl", "poster_url",
-      ]);
+      thumbnail = findObjectValue(object, ["thumbnail", "thumbnailUrl", "thumbnail_url", "poster", "posterUrl", "poster_url"]);
     }
 
     if (!width) width = findObjectValue(object, ["width", "videoWidth", "video_width"]);
@@ -128,10 +126,7 @@ function collectNaverVideoMetadata($, component) {
   component.find("*").each((_, element) => {
     const child = $(element);
     const attrs = child.attr() || {};
-
-    const hasVideoData = Object.keys(attrs).some(name =>
-      /vid|video|vod|inkey|in-key|thumbnail|poster|data-module/i.test(name)
-    );
+    const hasVideoData = Object.keys(attrs).some(name => /vid|video|vod|inkey|in-key|thumbnail|poster|data-module/i.test(name));
 
     if (hasVideoData) add(child);
   });
@@ -165,17 +160,53 @@ function enrichVideoCandidates($, component, candidates) {
   return candidates.map(candidate => ({...candidate, thumbnail: candidate.thumbnail || thumbnail}));
 }
 
+function getVideoBoxSize(component, result) {
+  const style = component.attr("style") || "";
+  const styleWidthMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i);
+  const styleHeightMatch = style.match(/(?:^|;)\s*height\s*:\s*(\d+(?:\.\d+)?)px/i);
+  const styleWidth = styleWidthMatch ? Math.round(Number(styleWidthMatch[1])) : 0;
+  const styleHeight = styleHeightMatch ? Math.round(Number(styleHeightMatch[1])) : 0;
+  const attributeWidth = Math.round(Number(component.attr("width") || 0));
+  const attributeHeight = Math.round(Number(component.attr("height") || 0));
+  const metadataWidth = Math.round(Number(result?.metadata?.width || 0));
+  const metadataHeight = Math.round(Number(result?.metadata?.height || 0));
+  const width = styleWidth || attributeWidth || metadataWidth || 512;
+  const height = styleHeight || attributeHeight || metadataHeight || 321;
+
+  return {width, height};
+}
+
 function createLocalVideoHtml(videoFilename, posterFilename) {
   const attributes = ["controls", 'preload="metadata"', `src="./${videoFilename}"`];
 
   if (posterFilename) attributes.push(`poster="./${posterFilename}"`);
 
-  attributes.push('style="display:block;width:100%;height:auto;"');
+  attributes.push('style="display:block;max-width:100%;max-height:100%;width:auto;height:auto;"');
 
   return `<video ${attributes.join(" ")}></video>`;
 }
 
 function replaceNaverVideoComponent($, component, result, posterFilename = "") {
+  const html = createLocalVideoHtml(result.videoFilename, posterFilename);
+
+  /*
+   * SmartEditor 1.x / 2.x 구형 네이버 동영상
+   */
+  if (component.is("pzp-pc-layout._naverVideo")) {
+    const {width, height} = getVideoBoxSize(component, result);
+
+    component.replaceWith(
+      `<div class="naver-local-video" data-naver-video="true" data-naver-vid="${result.vid}" `
+      + `style="width:${width}px;height:${height}px;max-width:100%;background:#000;display:flex;`
+      + `align-items:center;justify-content:center;overflow:hidden;">${html}</div>`
+    );
+
+    return true;
+  }
+
+  /*
+   * SmartEditor 3.x 이상
+   */
   let target = component.closest(".se-module.se-module-video");
 
   if (!target.length) target = component.find(".se-module.se-module-video").first();
@@ -189,9 +220,38 @@ function replaceNaverVideoComponent($, component, result, posterFilename = "") {
     return false;
   }
 
-  const html = createLocalVideoHtml(result.videoFilename, posterFilename);
+  /*
+   * 원본 플레이어 크기를 component와 module에서 찾는다.
+   */
+  let sizeSource = component;
 
-  target.attr("style", "position:relative !important;padding-top:0 !important;").empty().append(html);
+  const componentStyle = component.attr("style") || "";
+  const targetStyle = target.attr("style") || "";
+
+  const componentHasSize =
+    /(?:^|;)\s*width\s*:\s*\d+(?:\.\d+)?px/i.test(componentStyle)
+    || /(?:^|;)\s*height\s*:\s*\d+(?:\.\d+)?px/i.test(componentStyle)
+    || Number(component.attr("width") || 0) > 0
+    || Number(component.attr("height") || 0) > 0;
+
+  const targetHasSize =
+    /(?:^|;)\s*width\s*:\s*\d+(?:\.\d+)?px/i.test(targetStyle)
+    || /(?:^|;)\s*height\s*:\s*\d+(?:\.\d+)?px/i.test(targetStyle)
+    || Number(target.attr("width") || 0) > 0
+    || Number(target.attr("height") || 0) > 0;
+
+  if (!componentHasSize && targetHasSize) sizeSource = target;
+
+  const {width, height} = getVideoBoxSize(sizeSource, result);
+
+  target
+    .attr(
+      "style",
+      `width:${width}px;height:${height}px;max-width:100%;position:relative !important;padding-top:0 !important;`
+      + `background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;`
+    )
+    .empty()
+    .append(html);
 
   const outerComponent = target.closest(".se-component.se-video");
 
@@ -276,15 +336,21 @@ function findPreviousNaverVideo(previous$, previousRoot, vid, outputDir) {
 async function localizeNaverVideos($, root, imageManager, options = {}) {
   const {previous$ = null, previousRoot = null} = options;
 
-  const selectors = [".se-component.se-video", ".se_video", ".se-video", "[data-module*='video']"];
+  const selectors = [
+    ".se-component.se-video",
+    ".se_video",
+    ".se-video",
+    "[data-module*='video']",
+    "pzp-pc-layout._naverVideo",
+  ];
+
   const elements = root.find(selectors.join(", ")).add(root.filter(selectors.join(", "))).toArray();
   const components = [];
-
   const processed = new Set();
 
   for (const element of elements) {
     const current = $(element);
-    const owner = current.closest(".se-component.se-video, .se_video, .se-video");
+    const owner = current.closest(".se-component.se-video, .se_video, .se-video, pzp-pc-layout._naverVideo");
     const component = owner.length ? owner : current;
     const componentElement = component[0];
 
@@ -517,7 +583,7 @@ function protectNaverVideos($, root, store) {
 
     if (!video.length) continue;
 
-    component.replaceWith(`<div class="naver-protected">${store.add($.html(video))}</div>`);
+    component.replaceWith(`<div class="naver-protected">${store.add($.html(component))}</div>`);
   }
 }
 
