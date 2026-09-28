@@ -417,6 +417,10 @@ function renderGroups(runs, context) {
   }).join("");
 }
 
+function preserveLeadingSpaces(text) {
+  return String(text).replace(/^ +/, spaces => "&nbsp;".repeat(spaces.length));
+}
+
 function renderParagraph(node) {
   let runs = mergeRuns(collectStyleRuns(node));
 
@@ -441,7 +445,11 @@ function renderParagraph(node) {
     heading,
   };
 
-  const content = renderGroups(runs, context);
+  let content = renderGroups(runs, context);
+
+  if (!checkbox && !heading) {
+    content = preserveLeadingSpaces(content);
+  }
 
   if (checkbox) return { empty: false, text: `${checkbox.indent}- [${checkbox.checked}] ${content}` };
   if (heading) return { empty: false, text: `${"#".repeat(heading)} ${content}` };
