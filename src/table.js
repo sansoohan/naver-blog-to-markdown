@@ -970,6 +970,24 @@ function normalizeLegacyTableWidths($, table) {
   }
 }
 
+/*
+ * 구형 표 자체에 기본 폰트색이 없으면 검은색을 기본값으로 지정한다.
+ *
+ * table 자체에 지정된 color만 확인한다.
+ * 셀 / span / font의 개별 폰트색은 부분 서식이므로 건드리지 않는다.
+ */
+function ensureLegacyTableFontColor(table) {
+  const style = table.attr("style") || "";
+
+  if (/(?:^|;)\s*color\s*:\s*[^;]+/i.test(style)) return;
+  if (table.attr("color")) return;
+
+  table.attr(
+    "style",
+    `${style}${style.trim() && !style.trim().endsWith(";") ? ";" : ""}color:#000;`
+  );
+}
+
 const LEGACY_TABLE_STYLE = `
 <style>
 table.naver-legacy-table {
@@ -1048,6 +1066,12 @@ function protectTables($, root, store) {
      * 현재 Markdown 뷰어 폭에 맞는 상대 폭으로 바꾼다.
      */
     normalizeLegacyTableWidths($, cloned);
+
+    /*
+     * 표 자체에 기본 폰트색이 없으면
+     * 다크모드에서도 읽을 수 있도록 검은색을 기본값으로 지정한다.
+     */
+    ensureLegacyTableFontColor(cloned);
 
     let output = $.html(cloned);
 
