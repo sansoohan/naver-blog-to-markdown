@@ -72,9 +72,7 @@ function sameLink(a, b) {
   if (!a && !b) return true;
   if (!a || !b) return false;
 
-  return a.href === b.href
-    && a.target === b.target
-    && a.title === b.title;
+  return a.href === b.href && a.target === b.target && a.title === b.title;
 }
 
 function sameStyle(a, b) {
@@ -199,7 +197,7 @@ function parseListItem(runs) {
     text += run.text || "";
   }
 
-  const match = text.match(/^([ \t]*)- +/);
+  const match = text.match(/^([ \t]*)-\s+/);
   if (!match) return null;
 
   return {
@@ -216,7 +214,7 @@ function parseCheckbox(runs) {
     text += run.text || "";
   }
 
-  const match = text.match(/^([ \t]*)- +\[([xX ])\] */);
+  const match = text.match(/^([ \t]*)-\s+\[([xX ])\]\s*/);
   if (!match) return null;
 
   return {
@@ -435,9 +433,7 @@ function renderGroups(runs, context) {
 }
 
 function preserveMultipleSpaces(text) {
-  return String(text)
-    .replace(/^ +/g, spaces => "&nbsp;".repeat(spaces.length))
-    .replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
+  return String(text).replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
 }
 
 function renderParagraph(node) {
@@ -563,6 +559,28 @@ function protectTextLists($, root, store) {
 }
 
 /*
+ * SmartEditor 1/2 구형 <p>의 margin-left는 에디터에서 적용한
+ * 문단 들여쓰기를 나타낸다.
+ *
+ * 확인된 구형 문서에서는 40px 단위로 단계가 증가하므로
+ * 40px당 non-breaking space 4개로 변환한다.
+ */
+function getLegacyParagraphIndent(paragraph) {
+  const style = paragraph.attr("style") || "";
+  const marginLeft = getStyleProperty(style, "margin-left");
+  const match = marginLeft.match(/^(\d+(?:\.\d+)?)px$/i);
+
+  if (!match) return "";
+
+  const pixels = Number(match[1]);
+  if (!Number.isFinite(pixels) || pixels <= 0) return "";
+
+  const spaces = Math.round(pixels / 40) * 4;
+
+  return "&nbsp;".repeat(spaces);
+}
+
+/*
  * SmartEditor 1/2의 구형 본문은 SmartEditor 3/4처럼
  * .se-component.se-text / p.se-text-paragraph 구조를 사용하지 않고
  * 일반 <p>를 사용하는 경우가 있다.
@@ -592,24 +610,14 @@ function protectLegacyParagraphs($, root, store) {
      * 이미지, 표, 영상, 목록, 코드, 인용문 등의 블록 구조가 들어 있는
      * <p>는 다른 변환 로직이나 Turndown이 처리하도록 그대로 둔다.
      */
-    if (
-      paragraph.find(
-        "img,table,iframe,video,ul,ol,pre,blockquote"
-      ).length
-    ) {
-      continue;
-    }
+    if (paragraph.find("img,table,iframe,video,ul,ol,pre,blockquote").length) continue;
 
     const rendered = renderParagraph(element);
-    const value = rendered.empty
-      ? "NAVEREMPTYLINE"
-      : rendered.text;
-
+    const indent = rendered.empty ? "" : getLegacyParagraphIndent(paragraph);
+    const value = rendered.empty ? "NAVEREMPTYLINE" : `${indent}${rendered.text}`;
     const token = store.add(value);
 
-    paragraph.replaceWith(
-      `<div class="naver-protected">${token}</div>`
-    );
+    paragraph.replaceWith(`<div class="naver-protected">${token}</div>`);
   }
 }
 
