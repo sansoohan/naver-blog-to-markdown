@@ -400,10 +400,27 @@ function extractYoutubeId(value) {
   return getYouTubeId(normalizeUrl(value)) || "";
 }
 
+function addLazyLoadingToIframe(iframe) {
+  iframe.attr("loading", "lazy");
+  return iframe;
+}
+
+function restoreDeferredYouTubeSrc(iframe) {
+  const src = iframe.attr("src");
+  const deferredSrc = iframe.attr("data-youtube-src");
+
+  if (!src && deferredSrc) {
+    iframe.attr("src", deferredSrc);
+    iframe.removeAttr("data-youtube-src");
+  }
+
+  return iframe;
+}
+
 function makeYouTubeIframe(id, start = 0) {
   const src = `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ""}`;
 
-  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
+  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
 }
 
 function cheerioLoadFragment(html) {
@@ -413,7 +430,10 @@ function cheerioLoadFragment(html) {
 function findYouTubeIframe($, component) {
   const existing = component.find("iframe").first();
 
-  if (existing.length && getYouTubeId(existing.attr("src"))) return $.html(existing);
+  if (existing.length && getYouTubeId(existing.attr("src"))) {
+    addLazyLoadingToIframe(existing);
+    return $.html(existing);
+  }
 
   for (const element of component.find("script.__se_module_data").toArray()) {
     const script = $(element);
@@ -433,7 +453,10 @@ function findYouTubeIframe($, component) {
           const fragment = cheerioLoadFragment(candidate);
           const iframe = fragment("iframe").first();
 
-          if (iframe.length && getYouTubeId(iframe.attr("src"))) return fragment.html(iframe);
+          if (iframe.length && getYouTubeId(iframe.attr("src"))) {
+            addLazyLoadingToIframe(iframe);
+            return fragment.html(iframe);
+          }
         }
 
         const serialized = JSON.stringify(data);
@@ -507,6 +530,9 @@ function protectYouTube($, root, store) {
 
     if (!iframe.length) continue;
 
+    restoreDeferredYouTubeSrc(iframe);
+    addLazyLoadingToIframe(iframe);
+
     component.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
   }
 
@@ -514,11 +540,19 @@ function protectYouTube($, root, store) {
 
   for (const element of rawComponents) {
     const component = $(element);
-    const iframe = findYouTubeIframe($, component);
+    const iframeHtml = findYouTubeIframe($, component);
 
-    if (!iframe) continue;
+    if (!iframeHtml) continue;
 
-    component.replaceWith(`<div class="naver-protected">${store.add(iframe)}</div>`);
+    const fragment = cheerioLoadFragment(iframeHtml);
+    const iframe = fragment("iframe").first();
+
+    if (!iframe.length) continue;
+
+    restoreDeferredYouTubeSrc(iframe);
+    addLazyLoadingToIframe(iframe);
+
+    component.replaceWith(`<div class="naver-protected">${store.add(fragment.html(iframe))}</div>`);
   }
 
   const iframes = root.find("iframe").add(root.filter("iframe")).toArray();
@@ -526,7 +560,11 @@ function protectYouTube($, root, store) {
   for (const element of iframes) {
     const iframe = $(element);
 
+    restoreDeferredYouTubeSrc(iframe);
+
     if (!getYouTubeId(iframe.attr("src"))) continue;
+
+    addLazyLoadingToIframe(iframe);
 
     iframe.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
   }

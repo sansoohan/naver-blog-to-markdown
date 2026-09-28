@@ -315,6 +315,35 @@ function cleanArchivedRoot($, root) {
   cleanRuntimeClasses($, root);
 }
 
+/*
+ * original.html에 들어갈 최종 YouTube iframe을 지연 로딩 상태로 바꾼다.
+ *
+ * restoreYoutubeVideos()가 모든 YouTube를 복원한 뒤 실행하므로
+ * YouTube가 어떤 경로로 만들어졌는지와 관계없이 최종 iframe을 처리한다.
+ */
+function deferYouTubeIframes($, root) {
+  root.find("iframe").add(root.filter("iframe")).each((_, element) => {
+    const iframe = $(element);
+    const src = String(iframe.attr("src") || "").trim();
+
+    if (!/(?:youtube\.com|youtube-nocookie\.com)\/embed\//i.test(src)) {
+      return;
+    }
+
+    iframe.attr("data-youtube-src", src);
+    iframe.removeAttr("src");
+    iframe.attr("loading", "lazy");
+
+    const component = iframe.closest(".naver-local-youtube");
+
+    if (component.length) {
+      component.addClass("naver-youtube-loading");
+    } else {
+      iframe.wrap('<div class="naver-local-youtube naver-youtube-loading"></div>');
+    }
+  });
+}
+
 function beautifyArchivedHtml(html) {
   return prettifyHtml(html);
 }
@@ -325,6 +354,42 @@ function protectPostBody(html) {
 
 function restorePostBody(html, protectedBody) {
   return String(html).replace(protectedBody.token, () => protectedBody.content);
+}
+
+function getYouTubeLoaderScript() {
+  return `
+<script>
+(function () {
+  function loadYouTubeIframes() {
+    var iframes = document.querySelectorAll(
+      ".naver-local-youtube iframe[data-youtube-src]"
+    );
+
+    iframes.forEach(function (iframe, index) {
+      var src = iframe.getAttribute("data-youtube-src");
+
+      if (!src) return;
+
+      window.setTimeout(function () {
+        var component = iframe.closest(".naver-local-youtube");
+
+        iframe.addEventListener("load", function () {
+          if (component) {
+            component.classList.remove("naver-youtube-loading");
+          }
+        }, {once: true});
+
+        iframe.setAttribute("src", src);
+        iframe.removeAttribute("data-youtube-src");
+      }, index * 150);
+    });
+  }
+
+  window.addEventListener("load", function () {
+    window.setTimeout(loadYouTubeIframes, 100);
+  });
+})();
+</script>`;
 }
 
 async function makeHtml(rawHtml, outputDir, options = {}) {
@@ -362,6 +427,13 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   await localizeAttachments($, root, outputDir, {editorVersion, previous$, previousRoot});
 
   restoreYoutubeVideos($, root);
+
+  /*
+   * 반드시 restoreYoutubeVideos() 뒤에서 처리한다.
+   * 이 시점이면 복원 가능한 YouTube iframe이 전부 DOM에 존재한다.
+   */
+  deferYouTubeIframes($, root);
+
   cleanArchivedRoot($, root);
 
   const protectedBody = protectPostBody(wrapPostBody($.html(root), wrappers));
@@ -388,11 +460,30 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
           html,body{margin:0}
           .naver-local-video video{max-width:100%;height:auto}
           .naver-local-youtube iframe{max-width:100%}
+
+          .naver-youtube-loading{
+            position:relative;
+          }
+
+          .naver-youtube-loading::after{
+            content:"YouTube 로딩 중...";
+            position:absolute;
+            left:50%;
+            top:50%;
+            transform:translate(-50%,-50%);
+            z-index:1;
+            color:#888;
+            font-family:Arial,"Noto Sans KR",sans-serif;
+            font-size:14px;
+            pointer-events:none;
+          }
         </style>
       </head>
 
       <body${makeAttributeString(bodyAttributes)}>
         ${protectedBody.token}
+
+        ${getYouTubeLoaderScript()}
       </body>
     </html>
   `;

@@ -202,30 +202,40 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
           >
             <span>original.html</span>
 
-            {currentPost && !currentPost.hasHtml && <span className="missing-file text-danger fw-normal">파일 없음</span>}
+            {currentPost && !currentPost.hasHtml && (
+              <span className="missing-file text-danger fw-normal">파일 없음</span>
+            )}
           </div>
 
-          <div className="viewer-body flex-grow-1 overflow-hidden bg-body">
+          <div className="viewer-body flex-grow-1 overflow-hidden bg-body position-relative">
             {!currentPost ? (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 선택된 게시글이 없습니다.
               </div>
             ) : currentPost.hasHtml ? (
-              <iframe
-                ref={originalFrameRef}
-                key={`${currentPost.id}-html-${refreshKey}`}
-                className={`viewer-frame ${originalLoaded ? "visible" : "invisible"}`}
-                src={getOriginalUrl(currentPost)}
-                title="Original HTML"
-                onLoad={event => {
-                  const document = event.currentTarget.contentDocument;
+              <>
+                {!originalLoaded && (
+                  <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center text-secondary small">
+                    페이지 준비 중...
+                  </div>
+                )}
 
-                  if (!document) return;
+                <iframe
+                  ref={originalFrameRef}
+                  key={`${currentPost.id}-html-${refreshKey}`}
+                  className={`viewer-frame ${originalLoaded ? "visible" : "invisible"}`}
+                  src={getOriginalUrl(currentPost)}
+                  title="Original HTML"
+                  onLoad={event => {
+                    const document = event.currentTarget.contentDocument;
 
-                  applyOriginalSettings(document, darkMode);
-                  setOriginalLoaded(true);
-                }}
-              />
+                    if (!document) return;
+
+                    applyOriginalSettings(document, darkMode);
+                    setOriginalLoaded(true);
+                  }}
+                />
+              </>
             ) : (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 original.html이 없습니다.
@@ -278,27 +288,42 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             </div>
           </div>
 
-          <div className="viewer-body flex-grow-1 overflow-hidden bg-body">
+          <div className="viewer-body flex-grow-1 overflow-hidden bg-body position-relative">
             {!currentPost ? (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 선택된 게시글이 없습니다.
               </div>
             ) : currentPost.hasMarkdown ? (
-              <iframe
-                ref={markdownFrameRef}
-                key={`${currentPost.id}-markdown-${refreshKey}`}
-                className={`viewer-frame ${markdownLoaded ? "visible" : "invisible"}`}
-                src={getMarkdownUrl(currentPost)}
-                title="Markdown"
-                onLoad={event => {
-                  const document = event.currentTarget.contentDocument;
+              <>
+                {!markdownLoaded && (
+                  <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center text-secondary small">
+                    페이지 준비 중...
+                  </div>
+                )}
 
-                  if (!document) return;
+                <iframe
+                  ref={markdownFrameRef}
+                  key={`${currentPost.id}-markdown-${refreshKey}`}
+                  className={`viewer-frame ${markdownLoaded ? "visible" : "invisible"}`}
+                  src={getMarkdownUrl(currentPost)}
+                  title="Markdown"
+                  onLoad={event => {
+                    const document = event.currentTarget.contentDocument;
 
-                  applyMarkdownSettings(document, markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes);
-                  setMarkdownLoaded(true);
-                }}
-              />
+                    if (!document) return;
+
+                    applyMarkdownSettings(
+                      document,
+                      markdownZoom,
+                      removeParagraphMargins,
+                      darkMode,
+                      fancyCheckboxes
+                    );
+
+                    setMarkdownLoaded(true);
+                  }}
+                />
+              </>
             ) : (
               <div className="d-flex align-items-center justify-content-center h-100 text-secondary small">
                 index.md가 없습니다.

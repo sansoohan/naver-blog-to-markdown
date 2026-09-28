@@ -44,6 +44,41 @@ function encodeRelativePath(relativePath: string): string {
     .join("/");
 }
 
+function deferYouTubeIframes(html: string): string {
+  return html.replace(
+    /<iframe\b([^>]*?)\bsrc=(["'])(https?:\/\/(?:www\.)?(?:youtube\.com\/embed\/|youtube-nocookie\.com\/embed\/)[^"']+)\2([^>]*)>/gi,
+    (_match, before, quote, src, after) => {
+      return `<iframe${before}data-youtube-src=${quote}${src}${quote}${after}>`;
+    },
+  );
+}
+
+function getYouTubeDeferredLoaderScript(): string {
+  return `
+<script>
+(function () {
+  function restoreYouTubeIframes() {
+    var iframes = document.querySelectorAll("iframe[data-youtube-src]");
+
+    iframes.forEach(function (iframe, index) {
+      var src = iframe.getAttribute("data-youtube-src");
+
+      if (!src) return;
+
+      window.setTimeout(function () {
+        iframe.setAttribute("src", src);
+        iframe.removeAttribute("data-youtube-src");
+      }, index * 150);
+    });
+  }
+
+  window.addEventListener("load", function () {
+    window.setTimeout(restoreYouTubeIframes, 0);
+  });
+})();
+</script>`;
+}
+
 app.get("/api/health", (_request, response) => {
   response.json({
     status: "ok",
@@ -67,9 +102,11 @@ app.get("/api/posts", async (_request, response) => {
 /*
  * original.html
  *
- * HTML 내용을 API에서 직접 보내지 않고 실제 output 파일로 이동시킨다.
- * 그래야 original.html 안의 상대경로 CSS / 이미지 / 비디오가
- * 게시글 폴더를 기준으로 정상적으로 로드된다.
+ * 생성된 original.html로 이동한다.
+ * CSS / 이미지 / 비디오 등의 상대경로는
+ * 게시글 폴더를 기준으로 그대로 로드된다.
+ *
+ * YouTube 지연 로딩은 original.html 자체에서 처리한다.
  */
 app.get("/api/post/original", async (request, response) => {
   try {
@@ -104,6 +141,9 @@ app.get("/api/post/original", async (request, response) => {
  * index.md
  *
  * Markdown을 HTML로 변환해서 브라우저에서 렌더링한다.
+ *
+ * YouTube iframe의 src는 먼저 data-youtube-src로 옮겨 두고,
+ * 본문이 로드된 뒤 실제 src를 복구해서 순차적으로 로드한다.
  */
 app.get("/api/post/markdown", async (request, response) => {
   try {
@@ -123,7 +163,8 @@ app.get("/api/post/markdown", async (request, response) => {
 
     const filePath = path.join(postDirectory, "index.md");
     const source = await fs.readFile(filePath, "utf8");
-    const content = markdown.render(source);
+    const renderedContent = markdown.render(source);
+    const content = deferYouTubeIframes(renderedContent);
 
     const encodedPath = encodeRelativePath(relativePath);
     const baseUrl = `/output/${encodedPath}/`;
@@ -192,6 +233,8 @@ app.get("/api/post/markdown", async (request, response) => {
 
 <body>
 ${content}
+
+${getYouTubeDeferredLoaderScript()}
 </body>
 </html>`);
   } catch (error) {
