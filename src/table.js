@@ -124,26 +124,104 @@ function renderHtmlCell(cell) {
     }
   }
 
-  const paragraphs = cell.find("p.se-text-paragraph").toArray();
+  const modules = cell.find(".se-module.se-module-text").toArray();
 
-  if (!paragraphs.length) {
+  if (!modules.length) {
     return escapeHtmlText(
       cell.text().replace(/\u200b/g, "").replace(/\u00a0/g, " ").trim(),
     );
   }
 
-  return paragraphs.map((element) => {
-    const paragraph = cell.find(element);
-    const content = renderParagraphHtml(element);
+  const output = [];
 
-    if (!content.trim()) return "";
+  for (const moduleElement of modules) {
+    const module = cell.find(moduleElement);
+    const children = module.children().toArray();
 
-    const align = getParagraphAlignment(paragraph);
+    for (const element of children) {
+      const node = cell.find(element);
+      const tagName = String(element.name || "").toLowerCase();
 
-    return align
-      ? `<div style="text-align:${align};">${content}</div>`
-      : `<div>${content}</div>`;
-  }).filter(Boolean).join("");
+      /*
+       * Cheerio/parse5가 inline image 안의 block-level
+       * .se-state-error를 <p> 밖으로 이동시킨다.
+       *
+       * 이동된 error block 자체를 여기서 직접 처리한다.
+       */
+      if (node.hasClass("se-state-error")) {
+        const error = node.find(".se-state-error-text").first();
+        const link = error.find("a").first();
+
+        if (!error.length) continue;
+
+        if (link.length) {
+          link.attr(
+            "style",
+            "color:#ccc !important;"
+            + "text-decoration:underline;"
+            + "text-decoration-skip-ink:none;"
+            + "word-break:break-all;"
+            + "font-size:16px;"
+            + "line-height:1.38;"
+          );
+        }
+
+        const content = error.html().trim();
+
+        if (!content) continue;
+
+        output.push(
+          `<div style="text-align:left;">`
+          + `<span style="display:inline-flex;width:200px;height:112px;max-width:100%;`
+          + `background:#fcfcfc;border:1px solid #e9e9e9;box-sizing:border-box;`
+          + `align-items:center;justify-content:center;`
+          + `font-size:16px;line-height:1.38;color:#ccc;text-align:center;`
+          + `white-space:normal;">`
+          + `${content}</span>`
+          + `</div>`
+        );
+
+        continue;
+      }
+
+      if (tagName !== "p" || !node.hasClass("se-text-paragraph")) {
+        continue;
+      }
+
+      /*
+       * 실패한 inline image의 원래 <p>에는 parse5 처리 후
+       * 빈 .se-inline-image <a>만 남는다.
+       *
+       * 실제 error box는 바로 뒤의 .se-state-error에서 처리하므로
+       * 이 빈 paragraph는 출력하지 않는다.
+       */
+      if (node.find(".se-inline-image").length) {
+        const text = node
+          .text()
+          .replace(/\u200b/g, "")
+          .replace(/\u00a0/g, " ")
+          .trim();
+
+        if (!text) continue;
+      }
+
+      const content = renderParagraphHtml(element)
+        .replace(/\r?\n[ \t]*/g, "")
+        .trim();
+
+      if (!content) continue;
+
+      const align = getParagraphAlignment(node);
+
+      output.push(
+        align
+          ? `<div style="text-align:${align};">${content}</div>`
+          : `<div>${content}</div>`
+      );
+    }
+  }
+
+  return output.length ? output.join("") : "&nbsp;";
 }
 
 function getColumnCount($, table) {
@@ -184,7 +262,9 @@ function getColumnWidths($, table, columnCount) {
         const each = width / colspan;
 
         for (let offset = 0; offset < colspan; offset++) {
-          if (widths[column + offset] === null) widths[column + offset] = each;
+          if (widths[column + offset] === null) {
+            widths[column + offset] = each;
+          }
         }
       }
 
@@ -207,7 +287,16 @@ function getCellHeight(cell) {
   const style = cell.attr("style") || "";
   const match = style.match(/(?:^|;)\s*height\s*:\s*([\d.]+)(px|pt)/i);
 
-  return match ? `${Number(match[1])}${match[2].toLowerCase()}` : "";
+  return match
+    ? `${Number(match[1])}${match[2].toLowerCase()}`
+    : "";
+}
+
+function getCellBackgroundColor(cell) {
+  const style = cell.attr("style") || "";
+  const match = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
+
+  return match ? match[1].trim() : "";
 }
 
 function renderComplexTable($, table) {
@@ -233,8 +322,12 @@ function renderComplexTable($, table) {
 
       const height = getCellHeight(cell);
       const heightStyle = height ? `height:${height};` : "";
+      const backgroundColor = getCellBackgroundColor(cell);
+      const backgroundStyle = backgroundColor
+        ? `background-color:${backgroundColor};`
+        : "background:transparent;";
 
-      attrs += ` style="border:1px solid #d0d7de;padding:6px 10px;${heightStyle}background:transparent;vertical-align:top;"`;
+      attrs += ` style="border:1px solid #d0d7de;padding:6px 10px;${heightStyle}${backgroundStyle}vertical-align:top;"`;
 
       html += `<${tag}${attrs}>${renderHtmlCell(cell)}</${tag}>`;
     }
