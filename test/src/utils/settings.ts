@@ -55,7 +55,13 @@ export function applyMarkdownSettings(
 
   if (removeParagraphMargins) {
     rules.push(`
-      p {
+      body > p,
+      body > h1,
+      body > h2,
+      body > h3,
+      body > h4,
+      body > h5,
+      body > h6 {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
       }
