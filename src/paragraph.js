@@ -276,7 +276,7 @@ function isBlackColor(color) {
 }
 
 function renderHtmlFormatting(text, style, preserveFontSize) {
-  let result = escapeHtmlText(text);
+  let result = escapeHtmlText(text).replace(/`/g, "&#96;");
 
   if (style.strike) result = `<s>${result}</s>`;
   if (style.italic) result = `<em>${result}</em>`;
