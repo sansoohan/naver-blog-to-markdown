@@ -197,7 +197,7 @@ function parseListItem(runs) {
     text += run.text || "";
   }
 
-  const match = text.match(/^([ \t]*)-\s+/);
+  const match = text.match(/^([ \t]*)[-*]\s+/);
   if (!match) return null;
 
   return {
