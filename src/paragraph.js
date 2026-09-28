@@ -199,7 +199,7 @@ function parseListItem(runs) {
     text += run.text || "";
   }
 
-  const match = text.match(/^([ \t]*)-\s+/);
+  const match = text.match(/^([ \t]*)- +/);
   if (!match) return null;
 
   return {
@@ -216,7 +216,7 @@ function parseCheckbox(runs) {
     text += run.text || "";
   }
 
-  const match = text.match(/^([ \t]*)-\s+\[([xX ])\]\s*/);
+  const match = text.match(/^([ \t]*)- +\[([xX ])\] */);
   if (!match) return null;
 
   return {
