@@ -191,6 +191,23 @@ function isBodyFontSize(size) {
   return fontSizeRules.bodyRanges.some((range) => isInFontSizeRange(size, range));
 }
 
+function parseListItem(runs) {
+  let text = "";
+
+  for (const run of runs) {
+    if (run.type === "break") break;
+    text += run.text || "";
+  }
+
+  const match = text.match(/^([ \t]*)-\s+/);
+  if (!match) return null;
+
+  return {
+    indent: match[1],
+    length: match[0].length,
+  };
+}
+
 function parseCheckbox(runs) {
   let text = "";
 
@@ -417,8 +434,8 @@ function renderGroups(runs, context) {
   }).join("");
 }
 
-function preserveLeadingSpaces(text) {
-  return String(text).replace(/^ +/, spaces => "&nbsp;".repeat(spaces.length));
+function preserveMultipleSpaces(text) {
+  return String(text).replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
 }
 
 function renderParagraph(node) {
@@ -434,9 +451,11 @@ function renderParagraph(node) {
   const paragraphSize = getParagraphFontSize(runs);
   const mixed = hasMixedFontSizes(runs);
   const checkbox = parseCheckbox(runs);
-  const heading = !checkbox && !mixed ? getHeadingLevel(paragraphSize) : 0;
+  const listItem = !checkbox ? parseListItem(runs) : null;
+  const heading = !checkbox && !listItem && !mixed ? getHeadingLevel(paragraphSize) : 0;
 
   if (checkbox) runs = removeTextPrefix(runs, checkbox.length);
+  if (listItem) runs = removeTextPrefix(runs, listItem.length);
 
   const context = {
     paragraphSize,
@@ -447,11 +466,12 @@ function renderParagraph(node) {
 
   let content = renderGroups(runs, context);
 
-  if (!checkbox && !heading) {
-    content = preserveLeadingSpaces(content);
+  if (!checkbox && !listItem && !heading) {
+    content = preserveMultipleSpaces(content);
   }
 
   if (checkbox) return { empty: false, text: `${checkbox.indent}- [${checkbox.checked}] ${content}` };
+  if (listItem) return { empty: false, text: `${listItem.indent}- ${content}` };
   if (heading) return { empty: false, text: `${"#".repeat(heading)} ${content}` };
 
   return { empty: false, text: content };
