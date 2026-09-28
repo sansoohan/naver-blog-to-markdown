@@ -432,8 +432,21 @@ function renderGroups(runs, context) {
   }).join("");
 }
 
+/*
+ * !!! REGRESSION WARNING !!!
+ *
+ * 기존 기능 절대 누락/삭제/되돌리지 말 것.
+ * 이 함수는 문단 맨 앞 공백까지 &nbsp;로 보존해야 한다.
+ *
+ * 전체 코드 수정 시 과거 버전으로 덮어쓰지 말고,
+ * 반드시 현재 최신 코드를 기준으로 필요한 부분만 수정할 것.
+ *
+ * 기능누락 또 하면 뒤진다.
+ */
 function preserveMultipleSpaces(text) {
-  return String(text).replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
+  return String(text)
+    .replace(/^ +/, spaces => "&nbsp;".repeat(spaces.length))
+    .replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
 }
 
 function renderParagraph(node) {
