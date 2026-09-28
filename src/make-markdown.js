@@ -329,10 +329,14 @@ function protectOgCards($, root, store) {
     const text = [
       title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
       summary ? escapeHtmlText(summary) : "",
-      domain ? `<small>${escapeHtmlText(domain)}</small>` : "",
+      domain
+        ? `<small><span style="color:#03c75a;">${escapeHtmlText(domain)}</span></small>`
+        : "",
     ].filter(Boolean).join("<br>");
 
-    const textHtml = `<a href="${escapeHtmlAttribute(href)}">${text}</a>`;
+    const textHtml =
+      `<div style="padding:14px 16px;box-sizing:border-box;color:#222;">${text}</div>`;
+
     let imageHtml = "";
 
     if (imageSrc) {
@@ -345,9 +349,13 @@ function protectOgCards($, root, store) {
         : `<div style="width:120px;height:120px;flex:0 0 120px;display:flex;align-items:center;justify-content:center;background:#f5f5f5;color:#999;text-align:center;">이미지를 불러올 수 없습니다.</div>`;
     }
 
+    const linkHtml = isLarge
+      ? `<a href="${escapeHtmlAttribute(href)}" style="display:block;color:inherit;text-decoration:none;">${imageHtml}${textHtml}</a>`
+      : `<a href="${escapeHtmlAttribute(href)}" style="display:flex;align-items:center;color:inherit;text-decoration:none;">${imageHtml}${textHtml}</a>`;
+
     const html = isLarge
-      ? `<div class="naver-og-card-large" style="width:100%;max-width:450px;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`
-      : `<div style="display:flex;width:100%;max-width:450px;gap:12px;align-items:center;border:1px solid #ddd;box-sizing:border-box;">${imageHtml}${textHtml}</div>`;
+      ? `<div class="naver-og-card-large" style="width:100%;max-width:450px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`
+      : `<div style="width:100%;max-width:450px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`;
 
     component.replaceWith(
       `<div class="naver-protected">${store.add(html)}</div>`
