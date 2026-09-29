@@ -7,20 +7,9 @@ const {makeMarkdown} = require("./src/make-markdown");
 const {fetchNaver} = require("./src/naver-request");
 const {loadBackupCache, saveBackupCache, setResourceContext, clearResourceContext} = require("./src/backup-cache");
 const {createContentHash} = require("./src/content-hash");
+const {safeFilename, normalizeText} = require("./src/filename");
 
 const OUTPUT_ROOT = path.join(process.cwd(), "output");
-
-function safeFilename(value) {
-  return String(value || "")
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[. ]+$/g, "") || "untitled";
-}
-
-function normalizeText(value) {
-  return String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-}
 
 function extractPostCategoryNo($) {
   const selectors = [".blog2_series a[href*='categoryNo=']", "span.cate a[href*='categoryNo=']"];

@@ -105,6 +105,9 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   };
 
   const getMarkdownUrl = (post: PostInfo) => {
+    console.log("relativePath:", post.relativePath);
+    console.log("encoded:", encodeURIComponent(post.relativePath));
+
     return `/api/post/markdown?path=${encodeURIComponent(post.relativePath)}&refresh=${refreshKey}`;
   };
 
