@@ -329,11 +329,22 @@ function protectOgCards($, root, store) {
     const isLarge = component.hasClass("se-l-large_image")
       || component.find(".se-l-large_image,.thumb.b_size").length > 0;
 
+    /*
+     * 구형 네이버 OG 카드의 원본 CSS 폭만 보존한다.
+     * 높이와 float 등 원본 레이아웃 속성은 적용하지 않는다.
+     *
+     * .og / .box / .b_size = 513px
+     * .s_size = 136px
+     */
+    const legacyThumb = legacy ? component.find(".thumb").first() : null;
+    const cardWidth = legacy ? 513 : 450;
+    const thumbWidth = legacy && legacyThumb?.hasClass("s_size") ? 136 : cardWidth;
+
     const text = [
-      title ? `<strong>${escapeHtmlText(title)}</strong>` : "",
-      summary ? escapeHtmlText(summary) : "",
+      title ? `<strong style="font-size:14px;">${escapeHtmlText(title)}</strong>` : "",
+      summary ? `<span style="font-size:11px;">${escapeHtmlText(summary)}</span>` : "",
       domain
-        ? `<small><span style="color:#03c75a;">${escapeHtmlText(domain)}</span></small>`
+        ? `<span style="font-size:11px;color:#03c75a;">${escapeHtmlText(domain)}</span>`
         : "",
     ].filter(Boolean).join("<br>");
 
@@ -344,8 +355,10 @@ function protectOgCards($, root, store) {
 
     if (imageSrc) {
       imageHtml = isLarge
-        ? `<img src="${escapeHtmlAttribute(imageSrc)}" style="display:block;max-width:100%;">`
-        : `<img src="${escapeHtmlAttribute(imageSrc)}" width="120">`;
+        ? `<img src="${escapeHtmlAttribute(imageSrc)}" style="display:block;width:100%;max-width:${thumbWidth}px;">`
+        : legacy
+          ? `<img src="${escapeHtmlAttribute(imageSrc)}" style="display:block;width:100%;max-width:${thumbWidth}px;">`
+          : `<img src="${escapeHtmlAttribute(imageSrc)}" width="120">`;
     } else if (imageFailed) {
       imageHtml = isLarge
         ? `<div style="width:100%;aspect-ratio:513/268;display:flex;align-items:center;justify-content:center;background:#f5f5f5;color:#999;">이미지를 불러올 수 없습니다.</div>`
@@ -357,8 +370,8 @@ function protectOgCards($, root, store) {
       : `<a href="${escapeHtmlAttribute(href)}" style="display:flex;align-items:center;color:inherit;text-decoration:none;">${imageHtml}${textHtml}</a>`;
 
     const html = isLarge
-      ? `<div class="naver-og-card-large" style="width:100%;max-width:450px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`
-      : `<div style="width:100%;max-width:450px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`;
+      ? `<div class="naver-og-card-large" style="width:100%;max-width:${cardWidth}px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`
+      : `<div style="width:100%;max-width:${cardWidth}px;background:#fff;border:1px solid #ddd;box-sizing:border-box;">${linkHtml}</div>`;
 
     component.replaceWith(
       `<div class="naver-protected">${store.add(html)}</div>`
