@@ -12,86 +12,62 @@ export type PostInfo = {
   hasMarkdown: boolean;
 };
 
-type PostMetadata = {
+type BackupCacheEntry = {
+  hash?: string;
+  modifiedAt?: string | null;
   title?: string;
-  sourceUrl?: string;
+  category?: string;
+  categoryPath?: string[];
+  editorVersion?: number;
+  path?: string;
+  backedUpAt?: string;
+  resources?: Record<string, unknown>;
+  videos?: Record<string, unknown>;
 };
 
-async function readMetadata(directory: string): Promise<PostMetadata> {
-  try {
-    const source = await fs.readFile(path.join(directory, "metadata.json"), "utf8");
-    const metadata = JSON.parse(source);
+type BackupCache = Record<string, BackupCacheEntry>;
 
-    if (!metadata || typeof metadata !== "object") return {};
+function normalizeRelativePath(outputRoot: string, cachedPath: string): string {
+  const normalizedCachedPath = cachedPath.replaceAll("\\", "/");
+  const normalizedOutputRoot = outputRoot.replaceAll("\\", "/");
+  const outputFolderName = path.basename(normalizedOutputRoot);
 
-    return {
-      title: typeof metadata.title === "string" ? metadata.title : undefined,
-      sourceUrl: typeof metadata.sourceUrl === "string" ? metadata.sourceUrl : undefined,
-    };
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return {};
-    }
-
-    if (error instanceof SyntaxError) {
-      console.warn(`metadata.json 파싱 실패: ${path.join(directory, "metadata.json")}`);
-      return {};
-    }
-
-    throw error;
+  if (normalizedCachedPath === outputFolderName) {
+    return "";
   }
+
+  if (normalizedCachedPath.startsWith(`${outputFolderName}/`)) {
+    return normalizedCachedPath.slice(outputFolderName.length + 1);
+  }
+
+  if (path.isAbsolute(cachedPath)) {
+    return path.relative(outputRoot, cachedPath).replaceAll("\\", "/");
+  }
+
+  return normalizedCachedPath;
+}
+
+function getSourceUrl(cacheKey: string): string {
+  const parts = cacheKey.split("/");
+
+  if (parts.length < 2) return "";
+
+  const blogId = parts[0];
+  const logNo = parts[1];
+
+  if (!blogId || !logNo) return "";
+
+  return `https://blog.naver.com/${blogId}/${logNo}`;
 }
 
 export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
-  const posts: PostInfo[] = [];
+  const cachePath = path.join(outputRoot, "backup-cache.json");
 
-  async function scan(directory: string): Promise<void> {
-    const entries = await fs.readdir(directory, { withFileTypes: true });
-
-    const files = new Set(
-      entries
-        .filter(entry => entry.isFile())
-        .map(entry => entry.name),
-    );
-
-    const hasHtml = files.has("original.html");
-    const hasMarkdown = files.has("index.md");
-
-    if (hasHtml || hasMarkdown) {
-      const relativePath = path.relative(outputRoot, directory);
-      const normalizedPath = relativePath.replaceAll("\\", "/");
-      const parts = normalizedPath.split("/");
-      const folderName = parts.at(-1) ?? "";
-      const metadata = await readMetadata(directory);
-
-      posts.push({
-        id: normalizedPath,
-        category: parts.slice(0, -1).join("/"),
-        folderName,
-        relativePath: normalizedPath,
-        title: metadata.title || folderName,
-        sourceUrl: metadata.sourceUrl || "",
-        hasHtml,
-        hasMarkdown,
-      });
-
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (entry.name === ".tmp") continue;
-
-      await scan(path.join(directory, entry.name));
-    }
-  }
+  let cache: BackupCache;
 
   try {
-    await scan(outputRoot);
+    const source = await fs.readFile(cachePath, "utf8");
+    cache = JSON.parse(source) as BackupCache;
   } catch (error) {
     if (
       error instanceof Error &&
@@ -101,7 +77,47 @@ export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
       return [];
     }
 
+    if (error instanceof SyntaxError) {
+      console.warn(`backup-cache.json 파싱 실패: ${cachePath}`);
+      return [];
+    }
+
     throw error;
+  }
+
+  const posts: PostInfo[] = [];
+
+  for (const [cacheKey, entry] of Object.entries(cache)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (typeof entry.path !== "string" || !entry.path) continue;
+
+    const relativePath = normalizeRelativePath(outputRoot, entry.path);
+
+    if (!relativePath) continue;
+    if (relativePath === ".." || relativePath.startsWith("../")) continue;
+
+    const parts = relativePath.split("/");
+    const folderName = parts.at(-1) ?? "";
+
+    if (!folderName) continue;
+
+    const category =
+      Array.isArray(entry.categoryPath) && entry.categoryPath.length > 0
+        ? entry.categoryPath.join("/")
+        : typeof entry.category === "string"
+          ? entry.category
+          : parts.slice(0, -1).join("/");
+
+    posts.push({
+      id: relativePath,
+      category,
+      folderName,
+      relativePath,
+      title: typeof entry.title === "string" && entry.title ? entry.title : folderName,
+      sourceUrl: getSourceUrl(cacheKey),
+      hasHtml: true,
+      hasMarkdown: true,
+    });
   }
 
   return posts.sort((a, b) =>
