@@ -6,6 +6,7 @@ const {createImageManager, localizeImages} = require("./image");
 const {restoreYoutubeVideos, localizeNaverVideos} = require("./video");
 const {localizeAttachments} = require("./attachment");
 const {download} = require("./downloader");
+const {getContentWidths} = require("./content-width");
 
 function normalizeEditorVersion(value) {
   const version = Number(value);
@@ -107,7 +108,11 @@ function getStylesheetInfo($, pattern, filename) {
 }
 
 function getLayoutCssInfo($) {
-  return getStylesheetInfo($, /(?:LayoutTopCommon|PostTopCommon|PostViewCommon|PostListCommon).*\.css/i, "blog-layout.css");
+  return getStylesheetInfo(
+    $,
+    /(?:LayoutTopCommon|PostTopCommon|PostViewCommon|PostListCommon).*\.css/i,
+    "blog-layout.css"
+  );
 }
 
 function getPostViewCssInfo($) {
@@ -226,8 +231,10 @@ function prepareWrapperPath(root, editorVersion) {
     current = current.parent();
   }
 
-  if ((editorVersion === 3 || editorVersion === 4)
-      && !wrappers.some(wrapper => String(wrapper.attributes.class || "").split(/\s+/).includes("se-viewer"))) {
+  if (
+    (editorVersion === 3 || editorVersion === 4)
+    && !wrappers.some(wrapper => String(wrapper.attributes.class || "").split(/\s+/).includes("se-viewer"))
+  ) {
     wrappers.push({tagName: "div", attributes: {class: "se-viewer se-theme-default", lang: "ko-KR"}});
   }
 
@@ -262,17 +269,17 @@ function getInlineHeadCss($) {
   }).join("\n");
 }
 
-function getArchiveOverrideCss(editorVersion) {
+function getArchiveOverrideCss(editorVersion, containerWidth) {
   if (editorVersion !== 1 && editorVersion !== 2 && editorVersion !== 3 && editorVersion !== 4) return "";
 
   const rules = [
-    `#body{width:100%;max-width:none;margin:0 auto;}`,
-    `#wrapper{width:100%;max-width:none;margin:0 auto;box-sizing:border-box;}`,
-    `#content-area{width:580px;display:block;float:none;margin:0 auto;}`,
+    `#body{max-width:none;margin:0 auto;}`,
+    `#wrapper{max-width:none;margin:0 auto;box-sizing:border-box;}`,
+    `#content-area{${containerWidth ? `width:${containerWidth}px;` : ""}display:block;float:none;margin:0 auto;}`,
   ];
 
   if (editorVersion === 3 || editorVersion === 4) {
-    rules.push(`#post-area .bcc>[id^="post-view"].wrap_rabbit{width:100%;margin:auto;}`);
+    rules.push(`#post-area .bcc>[id^="post-view"].wrap_rabbit{margin:auto;}`);
   }
 
   return rules.join("");
@@ -398,7 +405,8 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   const root = getPostRoot($, editorVersion);
   const bodyAttributes = getBodyAttributes($);
   const inlineHeadCss = getInlineHeadCss($);
-  const archiveOverrideCss = getArchiveOverrideCss(editorVersion);
+  const {containerWidth, contentWidth} = getContentWidths(editorVersion, rawHtml);
+  const archiveOverrideCss = getArchiveOverrideCss(editorVersion, containerWidth);
   const previousHtml = String(options.previousHtml || "");
   let previous$ = null;
   let previousRoot = null;
@@ -458,7 +466,6 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
 
         <style>
           html,body{margin:0}
-          .naver-local-video video{max-width:100%;height:auto}
           .naver-local-youtube iframe{max-width:100%}
 
           .naver-youtube-loading{

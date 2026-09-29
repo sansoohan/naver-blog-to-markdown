@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const cheerio = require("cheerio");
 const {downloadNaverVideo, setNaverVideoPoster} = require("./downloader");
+const {CONTENT_WIDTH_LAYOUTS} = require("./content-width");
 
 function normalizeUrl(url) {
   return String(url || "").trim().replace(/&amp;/g, "&");
@@ -82,8 +83,6 @@ function getNaverVideoMetadata(element) {
   let vid = getAttributeValue(element, ["data-vid", "data-video-id", "data-videoid", "data-vod-id", "data-vodid", "vid"]);
   let inKey = getAttributeValue(element, ["data-inkey", "data-in-key", "data-video-key", "data-videokey", "key"]);
   let thumbnail = getAttributeValue(element, ["data-thumbnail", "data-thumbnail-url", "data-poster", "data-poster-url"]);
-  let width = getAttributeValue(element, ["data-width", "width"]);
-  let height = getAttributeValue(element, ["data-height", "height"]);
 
   for (const object of objects) {
     if (!vid) vid = findObjectValue(object, ["vid", "videoId", "video_id", "vodId", "vod_id"]);
@@ -92,17 +91,12 @@ function getNaverVideoMetadata(element) {
     if (!thumbnail) {
       thumbnail = findObjectValue(object, ["thumbnail", "thumbnailUrl", "thumbnail_url", "poster", "posterUrl", "poster_url"]);
     }
-
-    if (!width) width = findObjectValue(object, ["width", "videoWidth", "video_width"]);
-    if (!height) height = findObjectValue(object, ["height", "videoHeight", "video_height"]);
   }
 
   return {
     vid: String(vid || "").trim(),
     inKey: String(inKey || "").trim(),
     thumbnail: normalizeUrl(thumbnail),
-    width: Number(width || 0),
-    height: Number(height || 0),
   };
 }
 
@@ -160,102 +154,39 @@ function enrichVideoCandidates($, component, candidates) {
   return candidates.map(candidate => ({...candidate, thumbnail: candidate.thumbnail || thumbnail}));
 }
 
-function getVideoBoxSize(component, result) {
-  const style = component.attr("style") || "";
-  const styleWidthMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d+(?:\.\d+)?)px/i);
-  const styleHeightMatch = style.match(/(?:^|;)\s*height\s*:\s*(\d+(?:\.\d+)?)px/i);
-  const styleWidth = styleWidthMatch ? Math.round(Number(styleWidthMatch[1])) : 0;
-  const styleHeight = styleHeightMatch ? Math.round(Number(styleHeightMatch[1])) : 0;
-  const attributeWidth = Math.round(Number(component.attr("width") || 0));
-  const attributeHeight = Math.round(Number(component.attr("height") || 0));
-  const metadataWidth = Math.round(Number(result?.metadata?.width || 0));
-  const metadataHeight = Math.round(Number(result?.metadata?.height || 0));
-  const width = styleWidth || attributeWidth || metadataWidth || 512;
-  const height = styleHeight || attributeHeight || metadataHeight || 321;
-
-  return {width, height};
-}
-
-function createLocalVideoHtml(videoFilename, posterFilename) {
+function createLocalVideoHtml(videoFilename, posterFilename, vid, editorVersion) {
   const attributes = ["controls", 'preload="metadata"', `src="./${videoFilename}"`];
 
   if (posterFilename) attributes.push(`poster="./${posterFilename}"`);
 
-  attributes.push('style="display:block;max-width:100%;max-height:100%;width:auto;height:auto;"');
+  attributes.push('style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#000;"');
 
-  return `<video ${attributes.join(" ")}></video>`;
+  const layout = CONTENT_WIDTH_LAYOUTS[editorVersion];
+  const leftWidth = layout?.leftWidth || 0;
+  const rightWidth = layout?.rightWidth || 0;
+
+  return `<div class="naver-local-video" data-naver-video="true" data-naver-vid="${vid}" `
+    + `style="padding:0 ${rightWidth}px 0 ${leftWidth}px;box-sizing:border-box;">`
+    + `<video ${attributes.join(" ")}></video></div>`;
 }
 
-function replaceNaverVideoComponent($, component, result, posterFilename = "") {
-  const html = createLocalVideoHtml(result.videoFilename, posterFilename);
+function replaceNaverVideoComponent($, component, result, posterFilename = "", editorVersion = 0) {
+  const html = createLocalVideoHtml(result.videoFilename, posterFilename, result.vid, editorVersion);
 
   /*
    * SmartEditor 1.x / 2.x 구형 네이버 동영상
    */
   if (component.is("pzp-pc-layout._naverVideo")) {
-    const {width, height} = getVideoBoxSize(component, result);
-
-    component.replaceWith(
-      `<div class="naver-local-video" data-naver-video="true" data-naver-vid="${result.vid}" `
-      + `style="width:${width}px;height:${height}px;max-width:100%;background:#000;display:flex;`
-      + `align-items:center;justify-content:center;overflow:hidden;">${html}</div>`
-    );
-
+    component.replaceWith(html);
     return true;
   }
 
   /*
    * SmartEditor 3.x 이상
    */
-  let target = component.closest(".se-module.se-module-video");
+  const target = component.closest(".se-component.se-video").length ? component.closest(".se-component.se-video") : component;
 
-  if (!target.length) target = component.find(".se-module.se-module-video").first();
-
-  if (!target.length) {
-    target = $(".se-module.se-module-video").filter((_, element) => !$(element).find("video").length).first();
-  }
-
-  if (!target.length) {
-    console.warn(`Naver 동영상 넣을 위치를 찾지 못함: ${result.vid || "unknown"}`);
-    return false;
-  }
-
-  /*
-   * 원본 플레이어 크기를 component와 module에서 찾는다.
-   */
-  let sizeSource = component;
-
-  const componentStyle = component.attr("style") || "";
-  const targetStyle = target.attr("style") || "";
-
-  const componentHasSize =
-    /(?:^|;)\s*width\s*:\s*\d+(?:\.\d+)?px/i.test(componentStyle)
-    || /(?:^|;)\s*height\s*:\s*\d+(?:\.\d+)?px/i.test(componentStyle)
-    || Number(component.attr("width") || 0) > 0
-    || Number(component.attr("height") || 0) > 0;
-
-  const targetHasSize =
-    /(?:^|;)\s*width\s*:\s*\d+(?:\.\d+)?px/i.test(targetStyle)
-    || /(?:^|;)\s*height\s*:\s*\d+(?:\.\d+)?px/i.test(targetStyle)
-    || Number(target.attr("width") || 0) > 0
-    || Number(target.attr("height") || 0) > 0;
-
-  if (!componentHasSize && targetHasSize) sizeSource = target;
-
-  const {width, height} = getVideoBoxSize(sizeSource, result);
-
-  target
-    .attr(
-      "style",
-      `width:${width}px;height:${height}px;max-width:100%;position:relative !important;padding-top:0 !important;`
-      + `background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;`
-    )
-    .empty()
-    .append(html);
-
-  const outerComponent = target.closest(".se-component.se-video");
-
-  outerComponent.addClass("naver-local-video").attr("data-naver-video", "true").attr("data-naver-vid", result.vid);
+  target.replaceWith(html);
 
   return true;
 }
@@ -426,7 +357,7 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
       setNaverVideoPoster(result.vid, result.videoPath, posterPath);
     }
 
-    replaceNaverVideoComponent($, component, result, posterFilename);
+    replaceNaverVideoComponent($, component, result, posterFilename, options.editorVersion);
   }
 }
 
@@ -466,9 +397,41 @@ function extractYoutubeId(value) {
   return getYouTubeId(normalizeUrl(value)) || "";
 }
 
-function addLazyLoadingToIframe(iframe) {
+function getIframeAspectRatio(iframe) {
+  const width = Number(iframe.attr("width"));
+  const height = Number(iframe.attr("height"));
+
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return "";
+
+  return `${width}/${height}`;
+}
+
+function addLazyLoadingToIframe(iframe, useWrapperRatio = false) {
+  const aspectRatio = getIframeAspectRatio(iframe);
+
   iframe.attr("loading", "lazy");
+  iframe.removeAttr("width");
+  iframe.removeAttr("height");
+
+  if (useWrapperRatio) {
+    iframe.attr("style", "position:absolute;inset:0;display:block;width:100%;height:100%;");
+  } else if (aspectRatio) {
+    iframe.attr("style", `display:block;width:100%;aspect-ratio:${aspectRatio};`);
+  } else {
+    iframe.attr("style", "display:block;width:100%;");
+  }
+
   return iframe;
+}
+
+function prepareYouTubeModule(module) {
+  if (!module.length) return;
+
+  const style = String(module.attr("style") || "").trim();
+
+  if (/position\s*:/i.test(style)) return;
+
+  module.attr("style", `${style}${style && !style.endsWith(";") ? ";" : ""}position:relative;`);
 }
 
 function restoreDeferredYouTubeSrc(iframe) {
@@ -486,7 +449,10 @@ function restoreDeferredYouTubeSrc(iframe) {
 function makeYouTubeIframe(id, start = 0) {
   const src = `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ""}`;
 
-  return `<iframe width="560" height="315" src="${src}" title="YouTube video player" frameborder="0" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
+  return `<iframe src="${src}" title="YouTube video player" frameborder="0" loading="lazy" `
+    + `style="display:block;width:100%;" `
+    + `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" `
+    + `allowfullscreen></iframe>`;
 }
 
 function cheerioLoadFragment(html) {
@@ -496,10 +462,7 @@ function cheerioLoadFragment(html) {
 function findYouTubeIframe($, component) {
   const existing = component.find("iframe").first();
 
-  if (existing.length && getYouTubeId(existing.attr("src"))) {
-    addLazyLoadingToIframe(existing);
-    return $.html(existing);
-  }
+  if (existing.length && getYouTubeId(existing.attr("src"))) return $.html(existing);
 
   for (const element of component.find("script.__se_module_data").toArray()) {
     const script = $(element);
@@ -519,10 +482,7 @@ function findYouTubeIframe($, component) {
           const fragment = cheerioLoadFragment(candidate);
           const iframe = fragment("iframe").first();
 
-          if (iframe.length && getYouTubeId(iframe.attr("src"))) {
-            addLazyLoadingToIframe(iframe);
-            return fragment.html(iframe);
-          }
+          if (iframe.length && getYouTubeId(iframe.attr("src"))) return fragment.html(iframe);
         }
 
         const serialized = JSON.stringify(data);
@@ -555,17 +515,25 @@ function restoreYouTubeEmbeds($, root) {
     const component = $(element);
     if (component.hasClass("naver-local-youtube")) continue;
 
-    const iframe = findYouTubeIframe($, component);
-    if (!iframe) continue;
+    const iframeHtml = findYouTubeIframe($, component);
+    if (!iframeHtml) continue;
+
+    const fragment = cheerioLoadFragment(iframeHtml);
+    const iframe = fragment("iframe").first();
+
+    if (!iframe.length) continue;
 
     component.addClass("naver-local-youtube").attr("data-youtube", "true");
 
     const module = component.find(".se-module.se-module-oembed").first();
 
     if (module.length) {
-      module.empty().append(iframe);
+      addLazyLoadingToIframe(iframe, true);
+      prepareYouTubeModule(module);
+      module.empty().append(fragment.html(iframe));
     } else {
-      component.empty().append(iframe);
+      addLazyLoadingToIframe(iframe);
+      component.empty().append(fragment.html(iframe));
     }
   }
 }
@@ -583,7 +551,13 @@ function protectNaverVideos($, root, store) {
 
     if (!video.length) continue;
 
-    component.replaceWith(`<div class="naver-protected">${store.add($.html(component))}</div>`);
+    /*
+     * original.html에서만 사용하는 좌우 패딩 래퍼는 제거하고
+     * Markdown에는 video 태그만 보존한다.
+     */
+    const html = $.html(video).replace(/>\s+</g, "><");
+
+    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
   }
 }
 
@@ -592,14 +566,27 @@ function protectYouTube($, root, store) {
 
   for (const element of components) {
     const component = $(element);
+    const module = component.find(".se-module.se-module-oembed").first();
     const iframe = component.find("iframe").first();
 
     if (!iframe.length) continue;
 
     restoreDeferredYouTubeSrc(iframe);
-    addLazyLoadingToIframe(iframe);
 
-    component.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+    if (module.length) {
+      addLazyLoadingToIframe(iframe, true);
+      prepareYouTubeModule(module);
+    } else {
+      addLazyLoadingToIframe(iframe);
+    }
+
+    /*
+     * 신형 YouTube는 se-module-oembed의 padding-top 비율을 보존하고,
+     * 구형 YouTube는 iframe의 원본 width / height 비율을 aspect-ratio로 보존한다.
+     */
+    const html = module.length ? $.html(module).replace(/>\s+</g, "><") : $.html(iframe);
+
+    component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
   }
 
   const rawComponents = root.find(".se-component.se-oembed").add(root.filter(".se-component.se-oembed")).toArray();
@@ -616,9 +603,20 @@ function protectYouTube($, root, store) {
     if (!iframe.length) continue;
 
     restoreDeferredYouTubeSrc(iframe);
-    addLazyLoadingToIframe(iframe);
 
-    component.replaceWith(`<div class="naver-protected">${store.add(fragment.html(iframe))}</div>`);
+    const module = component.find(".se-module.se-module-oembed").first();
+
+    if (module.length) {
+      addLazyLoadingToIframe(iframe, true);
+      prepareYouTubeModule(module);
+      module.empty().append(fragment.html(iframe));
+
+      const html = $.html(module).replace(/>\s+</g, "><");
+      component.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+    } else {
+      addLazyLoadingToIframe(iframe);
+      component.replaceWith(`<div class="naver-protected">${store.add(fragment.html(iframe))}</div>`);
+    }
   }
 
   const iframes = root.find("iframe").add(root.filter("iframe")).toArray();
@@ -630,9 +628,18 @@ function protectYouTube($, root, store) {
 
     if (!getYouTubeId(iframe.attr("src"))) continue;
 
-    addLazyLoadingToIframe(iframe);
+    const module = iframe.closest(".se-module.se-module-oembed");
 
-    iframe.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+    if (module.length) {
+      addLazyLoadingToIframe(iframe, true);
+      prepareYouTubeModule(module);
+
+      const html = $.html(module).replace(/>\s+</g, "><");
+      module.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+    } else {
+      addLazyLoadingToIframe(iframe);
+      iframe.replaceWith(`<div class="naver-protected">${store.add($.html(iframe))}</div>`);
+    }
   }
 }
 
