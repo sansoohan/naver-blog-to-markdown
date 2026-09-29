@@ -533,7 +533,7 @@ function protectForeignFormattedBlocks($, root, store) {
 }
 
 function makeMarkdown(originalHtml, options = {}) {
-  const { title = "untitled", blogId = "", logNo = "", editorVersion = 0 } = options;
+  const {editorVersion = 0} = options;
 
   const $ = cheerio.load(originalHtml, { decodeEntities: false });
   const root = getPostRoot($, editorVersion);
@@ -591,11 +591,9 @@ function makeMarkdown(originalHtml, options = {}) {
   markdown = normalizeBreakSpacing(markdown);
   markdown = cleanMarkdown(markdown);
 
-  const originalUrl = blogId && logNo ? `https://blog.naver.com/${blogId}/${logNo}` : "";
-  const header = originalUrl ? `# ${title}\n\n> 원본: ${originalUrl}` : `# ${title}`;
   const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
 
-  return `${header}${horizontalLineCss ? `\n\n${horizontalLineCss}` : ""}\n\n${markdown}\n`;
+  return `${horizontalLineCss ? `${horizontalLineCss}\n\n` : ""}${markdown}\n`;
 }
 
 module.exports = {

@@ -74,7 +74,7 @@ function copyDirectory(source, destination) {
   fs.mkdirSync(destination, {recursive: true});
 
   for (const entry of fs.readdirSync(source, {withFileTypes: true})) {
-    if (entry.name === "original.html" || entry.name === "index.md") continue;
+    if (entry.name === "original.html" || entry.name === "index.md" || entry.name === "metadata.json") continue;
 
     const sourcePath = path.join(source, entry.name);
     const destinationPath = path.join(destination, entry.name);
@@ -114,6 +114,7 @@ function backupExists(outputDir) {
   if (!outputDir || !fs.existsSync(outputDir)) return false;
   if (!fs.existsSync(path.join(outputDir, "original.html"))) return false;
   if (!fs.existsSync(path.join(outputDir, "index.md"))) return false;
+  if (!fs.existsSync(path.join(outputDir, "metadata.json"))) return false;
 
   return true;
 }
@@ -230,7 +231,7 @@ async function convertPost(blogId, logNo, options = {}) {
    *
    * --update:
    * 기존 게시글 폴더 전체를 temp로 복사한 다음
-   * original.html / index.md만 삭제하고 다시 만든다.
+   * original.html / index.md / metadata.json만 삭제하고 다시 만든다.
    */
   let resourceSourceDir = "";
 
@@ -259,6 +260,7 @@ async function convertPost(blogId, logNo, options = {}) {
 
       fs.rmSync(path.join(tempOutputDir, "original.html"), {force: true});
       fs.rmSync(path.join(tempOutputDir, "index.md"), {force: true});
+      fs.rmSync(path.join(tempOutputDir, "metadata.json"), {force: true});
     }
 
     setResourceContext(cacheKey, tempOutputDir, useCache);
@@ -280,14 +282,25 @@ async function convertPost(blogId, logNo, options = {}) {
 
     fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
 
+    const metadata = {
+      title,
+      sourceUrl: `https://blog.naver.com/${blogId}/${logNo}`,
+    };
+
+    fs.writeFileSync(
+      path.join(tempOutputDir, "metadata.json"),
+      `${JSON.stringify(metadata, null, 2)}\n`,
+      "utf8"
+    );
+
     console.log("Markdown 생성 중...");
 
-    const markdown = await makeMarkdown(originalHtml, {title, blogId, logNo, editorVersion});
+    const markdown = await makeMarkdown(originalHtml, {editorVersion});
 
     fs.writeFileSync(path.join(tempOutputDir, "index.md"), markdown, "utf8");
 
     if (!backupExists(tempOutputDir)) {
-      throw new Error("임시 백업 폴더에 original.html 또는 index.md가 생성되지 않았습니다.");
+      throw new Error("임시 백업 폴더에 original.html, index.md 또는 metadata.json이 생성되지 않았습니다.");
     }
 
     /*
