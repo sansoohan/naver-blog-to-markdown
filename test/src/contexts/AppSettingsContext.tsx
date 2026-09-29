@@ -7,13 +7,17 @@ import {
   setBooleanSetting,
 } from "../utils/settings";
 
+const SYNC_SCROLL_KEY = "syncScroll";
+
 type AppSettingsContextValue = {
   removeParagraphMargins: boolean;
   darkMode: boolean;
   fancyCheckboxes: boolean;
+  syncScroll: boolean;
   setRemoveParagraphMargins: (value: boolean) => void;
   setDarkMode: (value: boolean) => void;
   setFancyCheckboxes: (value: boolean) => void;
+  setSyncScroll: (value: boolean) => void;
 };
 
 const AppSettingsContext = createContext<AppSettingsContextValue | null>(null);
@@ -35,6 +39,10 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     return getBooleanSetting(FANCY_CHECKBOXES_KEY, true);
   });
 
+  const [syncScroll, setSyncScrollState] = useState(() => {
+    return getBooleanSetting(SYNC_SCROLL_KEY, false);
+  });
+
   useEffect(() => {
     document.documentElement.setAttribute("data-bs-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
@@ -54,15 +62,22 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     setBooleanSetting(FANCY_CHECKBOXES_KEY, value);
   };
 
+  const setSyncScroll = (value: boolean) => {
+    setSyncScrollState(value);
+    setBooleanSetting(SYNC_SCROLL_KEY, value);
+  };
+
   return (
     <AppSettingsContext.Provider
       value={{
         removeParagraphMargins,
         darkMode,
         fancyCheckboxes,
+        syncScroll,
         setRemoveParagraphMargins,
         setDarkMode,
         setFancyCheckboxes,
+        setSyncScroll,
       }}
     >
       {children}

@@ -12,7 +12,13 @@ const MIN_MARKDOWN_ZOOM = 50;
 const MAX_MARKDOWN_ZOOM = 150;
 const MARKDOWN_ZOOM_STEP = 5;
 
+const DEFAULT_SPLIT_RATIO = 50;
+const MIN_SPLIT_RATIO = 20;
+const MAX_SPLIT_RATIO = 80;
+
 const LAST_VIEWED_POST_KEY = "lastViewedPostId";
+const MARKDOWN_ZOOM_KEY = "markdownZoom";
+const SPLIT_RATIO_KEY = "viewerSplitRatio";
 
 type ViewerPageProps = {
   posts: PostInfo[];
@@ -24,16 +30,18 @@ type ScrollPosition = {
   y: number;
 };
 
-function ViewerPage({ posts, postId }: ViewerPageProps) {
+function ViewerPage({posts, postId}: ViewerPageProps) {
   const navigate = useNavigate();
-  const { removeParagraphMargins, darkMode, fancyCheckboxes } = useAppSettings();
+  const {removeParagraphMargins, darkMode, fancyCheckboxes, syncScroll} = useAppSettings();
+
   const [refreshKey, setRefreshKey] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [originalLoaded, setOriginalLoaded] = useState(false);
   const [markdownLoaded, setMarkdownLoaded] = useState(false);
+  const [draggingSplitter, setDraggingSplitter] = useState(false);
 
   const [markdownZoom, setMarkdownZoom] = useState(() => {
-    const saved = Number(localStorage.getItem("markdownZoom"));
+    const saved = Number(localStorage.getItem(MARKDOWN_ZOOM_KEY));
 
     if (Number.isFinite(saved) && saved >= MIN_MARKDOWN_ZOOM && saved <= MAX_MARKDOWN_ZOOM) {
       return saved;
@@ -42,8 +50,25 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     return DEFAULT_MARKDOWN_ZOOM;
   });
 
+  const [splitRatio, setSplitRatio] = useState(() => {
+    const saved = Number(localStorage.getItem(SPLIT_RATIO_KEY));
+
+    if (Number.isFinite(saved) && saved >= MIN_SPLIT_RATIO && saved <= MAX_SPLIT_RATIO) {
+      return saved;
+    }
+
+    return DEFAULT_SPLIT_RATIO;
+  });
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const categorySelectRef = useRef<HTMLSelectElement>(null);
   const originalFrameRef = useRef<HTMLIFrameElement>(null);
   const markdownFrameRef = useRef<HTMLIFrameElement>(null);
+  const compareViewRef = useRef<HTMLElement>(null);
+  const splitterRef = useRef<HTMLDivElement>(null);
+  const syncingScrollRef = useRef(false);
+  const splitRatioRef = useRef(splitRatio);
+  const splitterPointerIdRef = useRef<number | null>(null);
 
   const currentIndex = useMemo(() => {
     if (!postId) return -1;
@@ -79,10 +104,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
       y: frameWindow.scrollY,
     };
 
-    sessionStorage.setItem(
-      getScrollStorageKey(postId, viewer),
-      JSON.stringify(position)
-    );
+    sessionStorage.setItem(getScrollStorageKey(postId, viewer), JSON.stringify(position));
   };
 
   const restoreScrollPosition = (
@@ -97,12 +119,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     try {
       const position = JSON.parse(saved) as ScrollPosition;
 
-      if (
-        typeof position.x !== "number" ||
-        typeof position.y !== "number"
-      ) {
-        return;
-      }
+      if (typeof position.x !== "number" || typeof position.y !== "number") return;
 
       frame.contentWindow?.scrollTo(position.x, position.y);
     } catch {
@@ -113,40 +130,63 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   const saveCurrentScrollPositions = () => {
     if (!currentPost) return;
 
-    saveScrollPosition(
-      currentPost.id,
-      "original",
-      originalFrameRef.current
-    );
-
-    saveScrollPosition(
-      currentPost.id,
-      "markdown",
-      markdownFrameRef.current
-    );
+    saveScrollPosition(currentPost.id, "original", originalFrameRef.current);
+    saveScrollPosition(currentPost.id, "markdown", markdownFrameRef.current);
   };
 
-  useEffect(() => {
-    if (!currentPost) return;
-    localStorage.setItem(LAST_VIEWED_POST_KEY, currentPost.id);
-  }, [currentPost]);
+  const updateSplitRatio = (clientX: number) => {
+    const container = compareViewRef.current;
 
-  useEffect(() => {
-    setOriginalLoaded(false);
-    setMarkdownLoaded(false);
-  }, [currentPost?.id, refreshKey]);
+    if (!container) return;
 
-  useEffect(() => {
-    const handlePageHide = () => {
-      saveCurrentScrollPositions();
-    };
+    const bounds = container.getBoundingClientRect();
+    const ratio = ((clientX - bounds.left) / bounds.width) * 100;
+    const next = Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
 
-    window.addEventListener("pagehide", handlePageHide);
+    splitRatioRef.current = next;
+    setSplitRatio(next);
+  };
 
-    return () => {
-      window.removeEventListener("pagehide", handlePageHide);
-    };
-  }, [currentPost]);
+  const startSplitterDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+
+    splitterPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    setDraggingSplitter(true);
+    updateSplitRatio(event.clientX);
+  };
+
+  const moveSplitter = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingSplitter) return;
+    if (splitterPointerIdRef.current !== event.pointerId) return;
+
+    event.preventDefault();
+    updateSplitRatio(event.clientX);
+  };
+
+  const stopSplitterDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (splitterPointerIdRef.current !== event.pointerId) return;
+
+    splitterPointerIdRef.current = null;
+    setDraggingSplitter(false);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    localStorage.setItem(SPLIT_RATIO_KEY, String(splitRatioRef.current));
+  };
+
+  const handleLostPointerCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (splitterPointerIdRef.current !== event.pointerId) return;
+
+    splitterPointerIdRef.current = null;
+    setDraggingSplitter(false);
+    localStorage.setItem(SPLIT_RATIO_KEY, String(splitRatioRef.current));
+  };
 
   const goToPost = (post: PostInfo) => {
     saveCurrentScrollPositions();
@@ -211,9 +251,6 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   };
 
   const getMarkdownUrl = (post: PostInfo) => {
-    console.log("relativePath:", post.relativePath);
-    console.log("encoded:", encodeURIComponent(post.relativePath));
-
     return `/api/post/markdown?path=${encodeURIComponent(post.relativePath)}&refresh=${refreshKey}`;
   };
 
@@ -221,15 +258,85 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     setMarkdownZoom(current => {
       const next = Math.min(MAX_MARKDOWN_ZOOM, Math.max(MIN_MARKDOWN_ZOOM, current + amount));
 
-      localStorage.setItem("markdownZoom", String(next));
+      localStorage.setItem(MARKDOWN_ZOOM_KEY, String(next));
       return next;
     });
   };
 
   const resetMarkdownZoom = () => {
     setMarkdownZoom(DEFAULT_MARKDOWN_ZOOM);
-    localStorage.setItem("markdownZoom", String(DEFAULT_MARKDOWN_ZOOM));
+    localStorage.setItem(MARKDOWN_ZOOM_KEY, String(DEFAULT_MARKDOWN_ZOOM));
   };
+
+  useEffect(() => {
+    if (!currentPost) return;
+    localStorage.setItem(LAST_VIEWED_POST_KEY, currentPost.id);
+  }, [currentPost]);
+
+  useEffect(() => {
+    setOriginalLoaded(false);
+    setMarkdownLoaded(false);
+  }, [currentPost?.id, refreshKey]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      saveCurrentScrollPositions();
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [currentPost]);
+
+  useEffect(() => {
+    if (!syncScroll || !originalLoaded || !markdownLoaded) return;
+
+    const originalWindow = originalFrameRef.current?.contentWindow;
+    const markdownWindow = markdownFrameRef.current?.contentWindow;
+
+    if (!originalWindow || !markdownWindow) return;
+
+    const sync = (source: Window, target: Window) => {
+      if (syncingScrollRef.current) return;
+
+      const sourceDocument = source.document.scrollingElement;
+      const targetDocument = target.document.scrollingElement;
+
+      if (!sourceDocument || !targetDocument) return;
+
+      const sourceMax = sourceDocument.scrollHeight - source.innerHeight;
+      const targetMax = targetDocument.scrollHeight - target.innerHeight;
+
+      if (sourceMax <= 0 || targetMax <= 0) return;
+
+      const ratio = source.scrollY / sourceMax;
+
+      syncingScrollRef.current = true;
+      target.scrollTo(target.scrollX, targetMax * ratio);
+
+      requestAnimationFrame(() => {
+        syncingScrollRef.current = false;
+      });
+    };
+
+    const handleOriginalScroll = () => {
+      sync(originalWindow, markdownWindow);
+    };
+
+    const handleMarkdownScroll = () => {
+      sync(markdownWindow, originalWindow);
+    };
+
+    originalWindow.addEventListener("scroll", handleOriginalScroll, {passive: true});
+    markdownWindow.addEventListener("scroll", handleMarkdownScroll, {passive: true});
+
+    return () => {
+      originalWindow.removeEventListener("scroll", handleOriginalScroll);
+      markdownWindow.removeEventListener("scroll", handleMarkdownScroll);
+    };
+  }, [syncScroll, originalLoaded, markdownLoaded, currentPost?.id, refreshKey]);
 
   useEffect(() => {
     const originalDocument = originalFrameRef.current?.contentDocument;
@@ -245,47 +352,74 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, currentPost?.id, refreshKey]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
 
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      ) {
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        categorySelectRef.current?.focus();
+        return;
+      }
+
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "ArrowLeft") {
+        event.preventDefault();
+
+        if (currentIndex > 0) {
+          goToPost(posts[currentIndex - 1]);
+        }
+
+        return;
+      }
+
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "ArrowRight") {
+        event.preventDefault();
+
+        if (currentIndex >= 0 && currentIndex < posts.length - 1) {
+          goToPost(posts[currentIndex + 1]);
+        }
+
         return;
       }
 
       if (event.key === "Escape" && settingsOpen) {
+        event.preventDefault();
         setSettingsOpen(false);
-        return;
-      }
-
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-
-        if (currentIndex > 0) {
-          saveCurrentScrollPositions();
-          navigate(getPostRoute(posts[currentIndex - 1].id));
-        }
-      }
-
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-
-        if (currentIndex >= 0 && currentIndex < posts.length - 1) {
-          saveCurrentScrollPositions();
-          navigate(getPostRoute(posts[currentIndex + 1].id));
-        }
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    const windows: Window[] = [window];
+    const originalWindow = originalFrameRef.current?.contentWindow;
+    const markdownWindow = markdownFrameRef.current?.contentWindow;
+
+    if (originalWindow) {
+      windows.push(originalWindow);
+    }
+
+    if (markdownWindow) {
+      windows.push(markdownWindow);
+    }
+
+    windows.forEach(targetWindow => {
+      targetWindow.addEventListener("keydown", handleShortcut);
+    });
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      windows.forEach(targetWindow => {
+        targetWindow.removeEventListener("keydown", handleShortcut);
+      });
     };
-  }, [posts, currentIndex, navigate, settingsOpen, currentPost]);
+  }, [originalLoaded, markdownLoaded, posts, currentIndex, currentPost, settingsOpen, refreshKey]);
 
   return (
     <div className="app d-flex flex-column w-100 vh-100 bg-body text-body">
@@ -295,6 +429,8 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         currentIndex={currentIndex}
         categories={categories}
         categoryPosts={categoryPosts}
+        searchInputRef={searchInputRef}
+        categorySelectRef={categorySelectRef}
         onPrevious={goPrevious}
         onNext={goNext}
         onSelectCategory={selectCategory}
@@ -306,6 +442,12 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
       <div className="post-title-bar d-flex align-items-center flex-shrink-0 gap-2 px-3 border-bottom bg-body">
         {currentPost ? (
           <>
+            {currentPost.category && (
+              <span className="badge text-bg-secondary flex-shrink-0">
+                {currentPost.category}
+              </span>
+            )}
+
             <span className="fw-semibold text-truncate">
               {currentPost.title || currentPost.folderName}
             </span>
@@ -332,14 +474,24 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             >
               <i className="bi bi-folder2-open"></i>
             </button>
+
+            {syncScroll && (
+              <span className="badge text-bg-primary ms-auto flex-shrink-0">
+                <i className="bi bi-link-45deg me-1"></i>
+                스크롤 동기화
+              </span>
+            )}
           </>
         ) : (
           <span className="text-secondary small">선택된 게시글이 없습니다.</span>
         )}
       </div>
 
-      <main className="compare-view d-flex flex-grow-1 bg-body text-body">
-        <section className="viewer d-flex flex-column flex-fill bg-body">
+      <main ref={compareViewRef} className="compare-view d-flex flex-grow-1 bg-body text-body position-relative">
+        <section
+          className="viewer d-flex flex-column bg-body"
+          style={{width: `calc(${splitRatio}% - 4px)`}}
+        >
           <div
             className={
               "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 " +
@@ -396,7 +548,31 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
           </div>
         </section>
 
-        <section className="viewer d-flex flex-column flex-fill border-start bg-body">
+        <div
+          ref={splitterRef}
+          className={`viewer-splitter flex-shrink-0 border-start border-end ${draggingSplitter ? "active" : ""}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="뷰어 크기 조절"
+          title="드래그하여 뷰어 크기 조절"
+          onPointerDown={startSplitterDrag}
+          onPointerMove={moveSplitter}
+          onPointerUp={stopSplitterDrag}
+          onPointerCancel={stopSplitterDrag}
+          onLostPointerCapture={handleLostPointerCapture}
+          onDoubleClick={() => {
+            splitRatioRef.current = DEFAULT_SPLIT_RATIO;
+            setSplitRatio(DEFAULT_SPLIT_RATIO);
+            localStorage.setItem(SPLIT_RATIO_KEY, String(DEFAULT_SPLIT_RATIO));
+          }}
+        >
+          <div className="viewer-splitter-handle position-absolute top-50 start-50 translate-middle rounded-pill bg-secondary" />
+        </div>
+
+        <section
+          className="viewer d-flex flex-column bg-body"
+          style={{width: `calc(${100 - splitRatio}% - 4px)`}}
+        >
           <div
             className={
               "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 " +
@@ -408,7 +584,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             <div className="d-flex align-items-center gap-2 ms-auto">
               <button
                 type="button"
-                className="btn btn-outline-secondary btn-sm icon-button"
+                className="btn btn-outline-secondary btn-sm icon-button d-inline-flex align-items-center justify-content-center"
                 onClick={() => changeMarkdownZoom(-MARKDOWN_ZOOM_STEP)}
                 disabled={!currentPost || markdownZoom <= MIN_MARKDOWN_ZOOM}
                 title="축소"
@@ -421,7 +597,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
 
               <button
                 type="button"
-                className="btn btn-outline-secondary btn-sm icon-button"
+                className="btn btn-outline-secondary btn-sm icon-button d-inline-flex align-items-center justify-content-center"
                 onClick={() => changeMarkdownZoom(MARKDOWN_ZOOM_STEP)}
                 disabled={!currentPost || markdownZoom >= MAX_MARKDOWN_ZOOM}
                 title="확대"
@@ -432,7 +608,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
 
               <button
                 type="button"
-                className="btn btn-outline-secondary btn-sm icon-button"
+                className="btn btn-outline-secondary btn-sm icon-button d-inline-flex align-items-center justify-content-center"
                 onClick={resetMarkdownZoom}
                 disabled={!currentPost || markdownZoom === DEFAULT_MARKDOWN_ZOOM}
                 title="배율 초기화"
@@ -496,6 +672,10 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             )}
           </div>
         </section>
+
+        {draggingSplitter && (
+          <div className="splitter-drag-overlay position-absolute top-0 start-0 w-100 h-100" />
+        )}
       </main>
 
       <SettingsPanel show={settingsOpen} onClose={() => setSettingsOpen(false)} />

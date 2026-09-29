@@ -39,9 +39,6 @@
 }
 
 .icon-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 31px;
   height: 31px;
   padding: 0;
@@ -53,7 +50,6 @@
 }
 
 .viewer {
-  width: 50%;
   min-width: 0;
   min-height: 0;
 }
@@ -77,6 +73,32 @@
 .viewer-frame {
   display: block;
   background-color: var(--bs-body-bg);
+}
+
+.viewer-splitter {
+  position: relative;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  background-color: var(--bs-tertiary-bg);
+  user-select: none;
+  z-index: 11;
+}
+
+.viewer-splitter:hover,
+.viewer-splitter.active {
+  background-color: var(--bs-secondary-bg);
+}
+
+.viewer-splitter-handle {
+  width: 2px;
+  height: 36px;
+}
+
+.splitter-drag-overlay {
+  z-index: 10;
+  cursor: col-resize;
+  user-select: none;
 }
 
 .zoom-value {
