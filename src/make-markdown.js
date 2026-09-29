@@ -39,6 +39,73 @@ function createStore() {
   };
 }
 
+/*
+ * 이미지 뒤에 같은 줄의 링크가 붙어 있는 인라인 구조는
+ * 다른 변환이 DOM을 분리하기 전에 HTML 그대로 보호한다.
+ *
+ * 예:
+ * <img ...> <a ...>링크</a> | <a ...>링크</a><br>
+ */
+function protectInlineHtmlLinkGroups($, root, store) {
+  const images = root.find("img").toArray();
+
+  for (const element of images) {
+    const image = $(element);
+
+    if (!image.parent().length) continue;
+    if (image.closest(".naver-protected,.naver-protected-inline").length) continue;
+
+    let sibling = element.nextSibling;
+    let hasLink = false;
+
+    while (sibling) {
+      const nodeName = String(sibling.name || sibling.tagName || sibling.nodeName || "").toLowerCase();
+
+      if (sibling.nodeType === 1 && nodeName === "br") break;
+
+      if (sibling.nodeType === 1 && nodeName === "a") {
+        hasLink = true;
+        break;
+      }
+
+      sibling = sibling.nextSibling;
+    }
+
+    if (!hasLink) continue;
+
+    /*
+     * 현재 img부터 <br> 직전까지를 하나의 HTML 인라인 조각으로 보호한다.
+     */
+    const nodes = [element];
+    sibling = element.nextSibling;
+
+    while (sibling) {
+      const nodeName = String(sibling.name || sibling.tagName || sibling.nodeName || "").toLowerCase();
+
+      if (sibling.nodeType === 1 && nodeName === "br") break;
+
+      nodes.push(sibling);
+      sibling = sibling.nextSibling;
+    }
+
+    const html = nodes.map(node => {
+      if (node.nodeType === 3) return node.nodeValue || "";
+      return $.html(node);
+    }).join("");
+
+    const token = store.add(html);
+
+    /*
+     * 첫 노드를 placeholder로 교체하고 나머지 노드는 제거한다.
+     */
+    image.replaceWith(`<span class="naver-protected-inline">${token}</span>`);
+
+    for (let index = 1; index < nodes.length; index++) {
+      $(nodes[index]).remove();
+    }
+  }
+}
+
 function createTurndown() {
   const turndown = new TurndownService({
     headingStyle: "atx",
@@ -55,6 +122,20 @@ function createTurndown() {
 
     replacement(content, node) {
       return `\n\n${node.textContent}\n\n`;
+    },
+  });
+
+  /*
+   * 인라인 HTML 보호용 placeholder.
+   * 블록 개행을 추가하지 않고 현재 위치 그대로 복구한다.
+   */
+  turndown.addRule("protectedInline", {
+    filter(node) {
+      return node.nodeName === "SPAN" && node.classList.contains("naver-protected-inline");
+    },
+
+    replacement(content, node) {
+      return node.textContent;
     },
   });
 
@@ -293,7 +374,7 @@ function protectStandaloneImages($, root, store) {
   root.find("img").each((_, element) => {
     const image = $(element);
 
-    if (image.closest(".naver-protected").length) return;
+    if (image.closest(".naver-protected,.naver-protected-inline").length) return;
 
     const markdown = makeImageMarkdown(image);
     if (!markdown) return;
@@ -463,6 +544,12 @@ function makeMarkdown(originalHtml, options = {}) {
    * 여기서는 네트워크 요청이나 다운로드를 하지 않는다.
    */
   removeArchiveOnlyElements(root);
+
+  /*
+   * img 뒤에 같은 줄의 링크가 붙어 있는 인라인 구조는
+   * 다른 변환이 DOM을 분리하기 전에 먼저 HTML로 보호한다.
+   */
+  protectInlineHtmlLinkGroups($, root, store);
 
   protectAttachments($, root, store);
   protectNaverVideos($, root, store);
