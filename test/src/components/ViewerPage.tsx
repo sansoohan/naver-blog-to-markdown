@@ -7,7 +7,7 @@ import { applyMarkdownSettings, applyOriginalSettings } from "../utils/settings"
 import SettingsPanel from "./SettingsPanel";
 import Toolbar from "./Toolbar";
 
-const DEFAULT_MARKDOWN_ZOOM = 90;
+const DEFAULT_MARKDOWN_ZOOM = 80;
 const MIN_MARKDOWN_ZOOM = 50;
 const MAX_MARKDOWN_ZOOM = 150;
 const MARKDOWN_ZOOM_STEP = 5;

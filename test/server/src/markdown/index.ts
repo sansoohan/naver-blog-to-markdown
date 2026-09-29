@@ -9,10 +9,7 @@ import mark from "markdown-it-mark";
 import ins from "markdown-it-ins";
 import anchor from "markdown-it-anchor";
 
-const markdown = new MarkdownIt({
-  html: true,
-  linkify: true,
-});
+const markdown = new MarkdownIt({html: true});
 
 markdown
   .use(taskLists)
