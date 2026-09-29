@@ -2,6 +2,7 @@ const { isSimpleTable, renderSimpleTable, renderComplexTable } = require("./rend
 const {
   shouldMakeTableTransparent,
   makeTableBackgroundTransparent,
+  fillTransparentCellBackgrounds,
   normalizeLegacyTableWidths,
   ensureLegacyTableFontColor,
 } = require("./legacy");
@@ -50,9 +51,6 @@ function protectTables($, root, store) {
   root.find("table").each((_, element) => {
     const table = $(element);
 
-    /*
-     * 실제 게시글 본문 안의 표만 처리한다.
-     */
     if (!table.closest(".post-view").length) return;
     if (table.closest(".naver-protected").length) return;
 
@@ -61,45 +59,29 @@ function protectTables($, root, store) {
     cloned.addClass("naver-legacy-table");
 
     /*
-     * shouldMakeTableTransparent() 내부에서
+     * 1단계:
+     * 전체 투명화 대상이면 투명화하고 색상 처리를 종료한다.
      *
-     * 1. 셀 배경색 보정
-     * 2. 보정된 셀 배경색 비교
-     * 3. 폰트색 / 글자 배경 검사
-     *
-     * 순서로 처리한다.
-     *
-     * 조건을 통과하면 그때 전체 투명화한다.
+     * 2단계:
+     * 전체 투명화 대상이 아니면 투명한 셀만 흰색으로 채운다.
      */
     const transparentTable = shouldMakeTableTransparent($, cloned);
 
     if (transparentTable) {
       makeTableBackgroundTransparent($, cloned);
+    } else {
+      fillTransparentCellBackgrounds($, cloned);
+      ensureLegacyTableFontColor(cloned);
     }
 
     /*
-     * 구형 표의 절대 폭을
-     * 현재 Markdown 뷰어 폭에 맞는 상대 폭으로 바꾼다.
+     * 색상 처리 이후에는 폭만 정규화한다.
      */
     normalizeLegacyTableWidths($, cloned);
 
     /*
-     * 투명화하지 않은 표에만 기본 폰트색을 지정한다.
-     *
-     * 투명화한 표는 원래의 고정 폰트색까지 제거한 상태이므로
-     * table에 color:#000을 다시 추가하면 안 된다.
-     */
-    if (!transparentTable) ensureLegacyTableFontColor(cloned);
-
-    /*
-     * 원본 구형 HTML에는 table 내부에
-     * 탭 / 개행 들여쓰기가 많이 들어 있다.
-     *
-     * Markdown에서는 탭 또는 4칸 들여쓰기가
-     * 코드블럭으로 해석될 수 있으므로
-     * 태그 사이의 whitespace만 제거한다.
-     *
-     * 실제 텍스트가 들어 있는 구간은 건드리지 않는다.
+     * Markdown에서 들여쓰기가 코드블럭으로 해석되지 않도록
+     * 태그 사이의 개행과 whitespace만 제거한다.
      */
     let output = $.html(cloned).replace(/\r?\n[ \t]*/g, "");
 

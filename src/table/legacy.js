@@ -8,16 +8,25 @@ function getCellBackgroundColor(cell) {
 
   /*
    * 1. background-color
+   *
+   * CSS가 존재하면 bgcolor보다 우선한다.
+   * transparent도 명시적인 CSS 값이므로
+   * bgcolor까지 내려가지 않고 투명으로 처리한다.
    */
   const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
 
   if (backgroundColorMatch) {
     const color = backgroundColorMatch[1].trim();
-    if (normalizeStyleColor(color) !== "transparent") return color;
+
+    return normalizeStyleColor(color) === "transparent"
+      ? ""
+      : color;
   }
 
   /*
    * 2. background shorthand
+   *
+   * background:transparent 역시 bgcolor보다 우선한다.
    */
   const backgroundMatch = style.match(
     /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
@@ -25,14 +34,15 @@ function getCellBackgroundColor(cell) {
 
   if (backgroundMatch) {
     const color = backgroundMatch[1].trim();
-    if (normalizeStyleColor(color) !== "transparent") return color;
+
+    return normalizeStyleColor(color) === "transparent"
+      ? ""
+      : color;
   }
 
   /*
-   * 3. 구형 HTML bgcolor
-   *
-   * CSS background가 transparent인 경우에도
-   * bgcolor는 실제 셀의 원래 배경색으로 사용한다.
+   * 3. CSS background가 아예 지정되지 않은 경우에만
+   * 구형 HTML bgcolor를 사용한다.
    */
   const bgcolor = cell.attr("bgcolor");
 
@@ -50,78 +60,21 @@ function normalizeStyleColor(value) {
 }
 
 /*
- * 표 안에 background-color가 지정된 셀이
- * 하나라도 있는지 검사한다.
- */
-function hasAnyCellBackgroundColor($, table) {
-  return table.find("th, td").toArray().some((element) => Boolean(getCellBackgroundColor($(element))));
-}
-
-/*
- * 셀 배경색 처리는 투명화 판정보다 먼저 한다.
+ * 표 전체를 투명화할 수 있는지 판정한다.
  *
- * 표 안에 background-color가 지정된 셀이 하나라도 있으면
- * 배경색이 지정되지 않은 나머지 셀을 #ffffff로 채운다.
- *
- * 모든 셀이 배경색 미지정이라면 아무것도 하지 않는다.
+ * 이 함수에서는 DOM을 절대로 수정하지 않는다.
+ * 원본의 배경색 / 폰트색 / 글자 배경색만 검사한다.
  */
-function fillMissingCellBackgrounds($, table) {
-  if (!hasAnyCellBackgroundColor($, table)) return;
-
-  table.find("th, td").each((_, element) => {
-    const cell = $(element);
-    const style = cell.attr("style") || "";
-
-    const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
-    const backgroundMatch = style.match(
-      /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
-    );
-
-    const backgroundColor = backgroundColorMatch ? normalizeStyleColor(backgroundColorMatch[1]) : "";
-    const background = backgroundMatch ? normalizeStyleColor(backgroundMatch[1]) : "";
-    const hasTransparentBackground = backgroundColor === "transparent" || background === "transparent";
-
-    /*
-     * 실제 CSS 배경색이 있으면 그대로 둔다.
-     */
-    if (backgroundColor && backgroundColor !== "transparent") return;
-    if (background && background !== "transparent") return;
-
-    /*
-     * CSS가 transparent이면 bgcolor가 있어도 CSS가 우선하므로
-     * transparent를 제거하고 bgcolor 색상을 CSS로 복원한다.
-     *
-     * bgcolor도 없으면 흰색으로 채운다.
-     */
-    const bgcolor = cell.attr("bgcolor");
-    const color = bgcolor ? String(bgcolor).trim() : "#ffffff";
-
-    let nextStyle = style
-      .replace(/(?:^|;)\s*background-color\s*:\s*transparent\s*;?/ig, "")
-      .replace(/(?:^|;)\s*background\s*:\s*transparent\s*;?/ig, "")
-      .trim();
-
-    if (nextStyle && !nextStyle.endsWith(";")) nextStyle += ";";
-
-    cell.attr("style", `${nextStyle}background-color:${color};`);
-  });
-}
-
 function shouldMakeTableTransparent($, table) {
   /*
    * 1단계:
    *
-   * 셀 배경색부터 처리한다.
+   * 모든 셀의 실제 배경색을 검사한다.
    *
-   * 일부 셀에만 배경색이 있으면
-   * 나머지 미지정 셀을 먼저 흰색으로 채운다.
-   */
-  fillMissingCellBackgrounds($, table);
-
-  /*
-   * 2단계:
+   * CSS background/background-color가 있으면
+   * bgcolor보다 CSS가 우선한다.
    *
-   * 보정이 끝난 셀들의 배경색을 검사한다.
+   * 투명 또는 배경 미지정은 __none__으로 취급한다.
    */
   const cellBackgroundColors = new Set();
 
@@ -129,13 +82,17 @@ function shouldMakeTableTransparent($, table) {
     const cell = $(element);
     const backgroundColor = getCellBackgroundColor(cell);
 
-    cellBackgroundColors.add(backgroundColor ? normalizeStyleColor(backgroundColor) : "__none__");
+    cellBackgroundColors.add(
+      backgroundColor
+        ? normalizeStyleColor(backgroundColor)
+        : "__none__"
+    );
   });
 
   /*
-   * 3단계:
+   * 2단계:
    *
-   * 아래에서 글자 서식을 검사한다.
+   * 글자 서식을 검사한다.
    */
   const fontColors = new Set();
   let hasTextBackgroundColor = false;
@@ -154,13 +111,27 @@ function shouldMakeTableTransparent($, table) {
     const style = node.attr("style") || "";
     const colorMatch = style.match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
 
-    if (colorMatch) fontColors.add(normalizeStyleColor(colorMatch[1]));
+    if (colorMatch) {
+      fontColors.add(normalizeStyleColor(colorMatch[1]));
+    }
 
     /*
-     * 실제 글자 span 자체에 background-color가 있으면
-     * 투명화하지 않는다.
+     * 실제 글자 span 자체에 배경색이 지정되어 있으면
+     * 표 전체 투명화 대상에서 제외한다.
      */
-    if (/(?:^|;)\s*background-color\s*:\s*[^;]+/i.test(style)) hasTextBackgroundColor = true;
+    const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
+
+    if (backgroundColorMatch && normalizeStyleColor(backgroundColorMatch[1]) !== "transparent") {
+      hasTextBackgroundColor = true;
+    }
+
+    const backgroundMatch = style.match(
+      /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
+    );
+
+    if (backgroundMatch && normalizeStyleColor(backgroundMatch[1]) !== "transparent") {
+      hasTextBackgroundColor = true;
+    }
   });
 
   /*
@@ -174,111 +145,93 @@ function shouldMakeTableTransparent($, table) {
 
     const color = node.attr("color");
 
-    if (color) fontColors.add(normalizeStyleColor(color));
+    if (color) {
+      fontColors.add(normalizeStyleColor(color));
+    }
   });
 
   /*
    * 최종 조건:
    *
-   * 1. 보정 후 모든 셀의 배경색이 동일함
+   * 1. 모든 셀의 실제 배경색이 동일함
    * 2. 지정된 폰트색이 없거나 전부 동일함
-   * 3. 실제 글자 자체에 배경색이 하나도 없음
+   * 3. 실제 글자 자체에 별도 배경색이 없음
    */
-  return cellBackgroundColors.size <= 1 && fontColors.size <= 1 && !hasTextBackgroundColor;
+  return (
+    cellBackgroundColors.size <= 1
+    && fontColors.size <= 1
+    && !hasTextBackgroundColor
+  );
 }
 
 /*
- * 투명화 조건을 만족한 구형 HTML 표의
- * 고정 서식을 제거한다.
+ * 1단계:
  *
- * - table / cell 배경 제거
- * - table / cell border 제거
- * - 동일한 font color 제거
+ * 투명화 대상으로 판정된 표는
+ * table부터 내부의 모든 요소까지
+ * 고정 시각 서식을 전부 제거한다.
+ *
+ * 실제 투명화 처리는 이 함수에서만 한다.
  */
 function makeTableBackgroundTransparent($, table) {
-  table.find("th, td").each((_, element) => {
-    const cell = $(element);
-    const style = cell.attr("style") || "";
+  table.find("*").addBack().each((_, element) => {
+    const node = $(element);
+    const style = node.attr("style") || "";
 
     let nextStyle = style
+      .replace(/(?:^|;)\s*color\s*:\s*[^;]+/ig, "")
       .replace(/(?:^|;)\s*background-color\s*:\s*[^;]+/ig, "")
       .replace(/(?:^|;)\s*background\s*:\s*[^;]+/ig, "")
-      .replace(/(?:^|;)\s*border(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+/ig, "");
-
-    nextStyle = nextStyle.trim();
-
-    cell.attr("style", `${nextStyle}${nextStyle && !nextStyle.endsWith(";") ? ";" : ""}background-color:transparent;`);
-
-    cell.removeAttr("bgcolor");
-    cell.removeAttr("border");
-  });
-
-  /*
-   * 실제 텍스트가 있는 span에서
-   * 동일한 고정 폰트색을 제거한다.
-   */
-  table.find("span[style]").each((_, element) => {
-    const node = $(element);
-
-    if (!getActualText(node)) return;
-
-    const style = node.attr("style") || "";
-    let nextStyle = style.replace(/(?:^|;)\s*color\s*:\s*[^;]+/ig, "");
-
-    nextStyle = nextStyle.trim();
+      .replace(/(?:^|;)\s*border(?:-(?:top|right|bottom|left))?(?:-(?:width|style|color))?\s*:\s*[^;]+/ig, "")
+      .trim();
 
     if (nextStyle) {
       node.attr("style", nextStyle);
     } else {
       node.removeAttr("style");
     }
-  });
-
-  /*
-   * 구형 <font color="..."> 제거.
-   */
-  table.find("font[color]").each((_, element) => {
-    const node = $(element);
-
-    if (!getActualText(node)) return;
 
     node.removeAttr("color");
-  });
-
-  /*
-   * table 자체의 배경과 border도 제거한다.
-   */
-  const style = table.attr("style") || "";
-
-  let nextStyle = style
-    .replace(/(?:^|;)\s*background-color\s*:\s*[^;]+/ig, "")
-    .replace(/(?:^|;)\s*background\s*:\s*[^;]+/ig, "")
-    .replace(/(?:^|;)\s*border(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+/ig, "");
-
-  nextStyle = nextStyle.trim();
-
-  table.attr("style", `${nextStyle}${nextStyle && !nextStyle.endsWith(";") ? ";" : ""}background:transparent;`);
-
-  table.removeAttr("bgcolor");
-  table.removeAttr("border");
-}
-
-function hasCellFontStyle(cell) {
-  return cell.find("[style]").toArray().some((element) => {
-    const style = cell.find(element).attr("style") || "";
-    return /(?:^|;)\s*(?:color|background-color)\s*:\s*[^;]+/i.test(style);
+    node.removeAttr("bgcolor");
+    node.removeAttr("border");
+    node.removeAttr("bordercolor");
   });
 }
 
-function isWhiteBackground(color) {
-  const value = String(color || "").trim().replace(/\s+/g, "").toLowerCase();
+/*
+ * 2단계:
+ *
+ * 표 전체가 투명화 대상이 아닌 경우
+ * 실제 배경이 투명한 셀만 흰색으로 채운다.
+ *
+ * 기존 배경색 / 폰트색 / border는 건드리지 않는다.
+ */
+function fillTransparentCellBackgrounds($, table) {
+  table.find("th, td").each((_, element) => {
+    const cell = $(element);
 
-  return value === "#fff"
-    || value === "#ffffff"
-    || value === "white"
-    || value === "rgb(255,255,255)"
-    || value === "rgba(255,255,255,1)"
-    || value === "rgba(255,255,255,1.0)";
+    /*
+     * 실제 배경색이 있으면 그대로 유지한다.
+     */
+    if (getCellBackgroundColor(cell)) return;
+
+    const style = cell.attr("style") || "";
+
+    /*
+     * 기존 transparent 선언을 제거한 뒤
+     * 흰색을 명시한다.
+     */
+    let nextStyle = style
+      .replace(/(?:^|;)\s*background-color\s*:\s*transparent\s*;?/ig, "")
+      .replace(/(?:^|;)\s*background\s*:\s*transparent\s*;?/ig, "")
+      .trim();
+
+    if (nextStyle && !nextStyle.endsWith(";")) {
+      nextStyle += ";";
+    }
+
+    cell.attr("style", `${nextStyle}background-color:#ffffff;`);
+  });
 }
 
 /*
@@ -336,7 +289,14 @@ function buildLegacyTableGrid($, table) {
 
       while (occupied[rowIndex][column]) column++;
 
-      cells.push({ cell, row: rowIndex, column, rowspan, colspan, width: getLegacyWidth(cell) });
+      cells.push({
+        cell,
+        row: rowIndex,
+        column,
+        rowspan,
+        colspan,
+        width: getLegacyWidth(cell),
+      });
 
       for (let rowOffset = 0; rowOffset < rowspan; rowOffset++) {
         const targetRow = rowIndex + rowOffset;
@@ -352,7 +312,10 @@ function buildLegacyTableGrid($, table) {
       columnCount = Math.max(columnCount, column);
     }
 
-    columnCount = Math.max(columnCount, occupied[rowIndex].length);
+    columnCount = Math.max(
+      columnCount,
+      occupied[rowIndex].length
+    );
   });
 
   return { cells, columnCount };
@@ -373,7 +336,13 @@ function getLegacyColumnWidths(grid) {
    * colspan=1 셀은 해당 열의 직접적인 폭 정보이므로 가장 신뢰한다.
    */
   for (const item of grid.cells) {
-    if (item.colspan !== 1 || item.width === null || typeof item.width === "object") continue;
+    if (
+      item.colspan !== 1
+      || item.width === null
+      || typeof item.width === "object"
+    ) {
+      continue;
+    }
 
     if (confidence[item.column] < 2) {
       widths[item.column] = item.width;
@@ -392,11 +361,19 @@ function getLegacyColumnWidths(grid) {
     changed = false;
 
     for (const item of grid.cells) {
-      if (item.width === null || typeof item.width === "object" || item.colspan <= 1) continue;
+      if (
+        item.width === null
+        || typeof item.width === "object"
+        || item.colspan <= 1
+      ) {
+        continue;
+      }
 
       const columns = [];
 
-      for (let offset = 0; offset < item.colspan; offset++) columns.push(item.column + offset);
+      for (let offset = 0; offset < item.colspan; offset++) {
+        columns.push(item.column + offset);
+      }
 
       const known = columns.filter((column) => widths[column] !== null);
       const unknown = columns.filter((column) => widths[column] === null);
@@ -423,7 +400,12 @@ function getLegacyColumnWidths(grid) {
    * 아직 폭을 모르는 열이 있으면 colspan 셀의 평균값을 사용한다.
    */
   for (const item of grid.cells) {
-    if (item.width === null || typeof item.width === "object") continue;
+    if (
+      item.width === null
+      || typeof item.width === "object"
+    ) {
+      continue;
+    }
 
     const each = item.width / item.colspan;
 
@@ -447,7 +429,9 @@ function getLegacyColumnWidths(grid) {
     const average = knownWidths.reduce((sum, width) => sum + width, 0) / knownWidths.length;
 
     for (let column = 0; column < widths.length; column++) {
-      if (widths[column] === null) widths[column] = average;
+      if (widths[column] === null) {
+        widths[column] = average;
+      }
     }
   }
 
@@ -460,6 +444,7 @@ function formatLegacyPercent(value) {
 
 function replaceLegacyWidth(cell, percent) {
   const style = cell.attr("style") || "";
+
   const nextStyle = style.replace(
     /((?:^|;)\s*width\s*:\s*)[\d.]+\s*(?:pt|px|%)/i,
     `$1${formatLegacyPercent(percent)}%`
@@ -481,7 +466,12 @@ function normalizeLegacyTableWidths($, table) {
 
   const columnWidths = getLegacyColumnWidths(grid);
 
-  if (!columnWidths.length || columnWidths.some((width) => !(width > 0))) return;
+  if (
+    !columnWidths.length
+    || columnWidths.some((width) => !(width > 0))
+  ) {
+    return;
+  }
 
   const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
 
@@ -498,7 +488,9 @@ function normalizeLegacyTableWidths($, table) {
       percent += percentages[item.column + offset] || 0;
     }
 
-    if (percent > 0) replaceLegacyWidth(item.cell, percent);
+    if (percent > 0) {
+      replaceLegacyWidth(item.cell, percent);
+    }
   }
 
   /*
@@ -532,6 +524,7 @@ module.exports = {
   getCellBackgroundColor,
   shouldMakeTableTransparent,
   makeTableBackgroundTransparent,
+  fillTransparentCellBackgrounds,
   normalizeLegacyTableWidths,
   ensureLegacyTableFontColor,
 };
