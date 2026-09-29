@@ -97,8 +97,20 @@ function createContentHash(root) {
   clone.find("._naverVideo").each((_, element) => {
     const $el = clone.find(element);
     const vid = $el.attr("vid") || "";
+    const parent = $el.parent();
 
     $el.replaceWith(`<div class="_naverVideo" vid="${vid}"></div>`);
+
+    if (parent.is("p") && !parent.text().trim()) parent.replaceWith(parent.contents());
+  });
+
+  clone.find("._naverVideo").each((_, element) => {
+    const $el = clone.find(element);
+    const prev = $el.prev();
+    const next = $el.next();
+
+    if (prev.is("p") && !prev.html().trim()) prev.remove();
+    if (next.is("p") && !next.html().trim()) next.remove();
   });
 
   /*
@@ -225,6 +237,26 @@ function createContentHash(root) {
   clone.find(".se-oglink-thumbnail").remove();
 
   /*
+   * [해시 제외 - OG 링크 런타임 클래스]
+   *
+   * 네이버 OG 링크 컴포넌트에는 페이지를 불러오는 시점의 JavaScript 실행 상태에 따라
+   * __se-component 클래스가 추가되거나 존재하지 않을 수 있다.
+   *
+   * 실제 확인된 차이:
+   *
+   *   se-component se-oglink se-l-text
+   *   se-component se-oglink se-l-text __se-component
+   *
+   * OG 링크의 실제 href, 제목, 요약, URL 정보는 동일하므로
+   * __se-component 클래스만 해시에서 제외한다.
+   *
+   * 중요:
+   * .se-component.se-oglink 전체를 제거하지 말 것.
+   * 실제 링크 주소나 제목 등의 콘텐츠가 변경되면 해시도 변경되어야 한다.
+   */
+  clone.find(".se-component.se-oglink.__se-component").removeClass("__se-component");
+
+  /*
    * [해시 제외 - 네이버 이미지 렌더링 옵션]
    *
    * 네이버 이미지 URL의 type query parameter는 같은 원본 이미지에서도
@@ -292,6 +324,50 @@ function createContentHash(root) {
       $el.attr("href", url.toString());
     } catch {}
   });
+
+  /*
+   * [해시 제외 - 구형 네이버 첨부파일 다운로드 URL 해시]
+   *
+   * 구형 게시글의 download.blog.naver.com/open/ URL에는 같은 첨부파일이어도
+   * 페이지를 다시 불러올 때 변경될 수 있는 동적 해시가 경로에 포함된다.
+   *
+   * 실제 확인된 차이:
+   *
+   *   https://download.blog.naver.com/open/<동적 해시>/<고정 경로>/<파일명>
+   *
+   * 첨부파일의 나머지 경로와 파일명은 유지하고 동적 해시 부분만 고정된 값으로 정규화한다.
+   *
+   * 중요:
+   * URL 전체를 제거하지 말 것.
+   * 실제 첨부파일 경로나 파일명이 변경되면 해시도 변경되어야 한다.
+   */
+  clone.find("a[href]").each((_, element) => {
+    const $el = clone.find(element);
+    const href = $el.attr("href");
+
+    if (!href) return;
+
+    const normalizedHref = href.replace(
+      /(https:\/\/download\.blog\.naver\.com\/open\/)[^/]+\//i,
+      "$1{HASH}/"
+    );
+
+    if (normalizedHref !== href) $el.attr("href", normalizedHref);
+  });
+
+  /*
+   * [해시 제외 - 태그 UI]
+   *
+   * 네이버 블로그의 .wrap_tag 영역은 페이지를 불러오는 시점의 JavaScript 로딩 상태에 따라
+   * 실제 태그 목록이 표시되거나 "작성된 태그가 없습니다." 상태로 표시될 수 있다.
+   *
+   * 같은 게시글에서도 태그 UI의 로딩 상태만으로 HTML이 달라지는 것이 확인되었다.
+   *
+   * 중요:
+   * 태그 UI의 일시적인 로딩 차이로 게시글이 수정된 것으로 판단되지 않도록
+   * .wrap_tag 전체를 해시에서 제외한다.
+   */
+  clone.find(".wrap_tag").remove();
 
   /*
    * [해시 제외 - HTML 주석]
