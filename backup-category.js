@@ -1,6 +1,7 @@
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
 const {checkBackupCache} = require("./src/backup-cache");
+const {runCli} = require("./src/cli");
 const {
   parseBlogUrl,
   getCategoryList,
@@ -64,7 +65,12 @@ async function selectCategory(categories, inputName = "") {
 }
 
 async function backupPosts(blogId, posts, options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {
+    includePrivate = false,
+    update = false,
+    useCache = false,
+    outputDir = "",
+  } = options;
 
   if (!posts.length) {
     console.log("백업할 게시글이 없습니다.");
@@ -88,7 +94,13 @@ async function backupPosts(blogId, posts, options = {}) {
   let failed = 0;
   const updatedPosts = [];
 
-  console.log(update ? "업데이트 확인 모드로 백업을 시작합니다.\n" : "백업을 시작합니다.\n");
+  if (update) {
+    console.log("업데이트 확인 모드로 백업을 시작합니다.\n");
+  } else if (useCache) {
+    console.log("리소스 캐시 재사용 모드로 백업을 시작합니다.\n");
+  } else {
+    console.log("백업을 시작합니다.\n");
+  }
 
   for (let index = 0; index < posts.length; index++) {
     const post = posts[index];
@@ -99,7 +111,7 @@ async function backupPosts(blogId, posts, options = {}) {
     console.log(`[${index + 1}/${posts.length}] ${post.title || post.logNo}`);
     console.log(`카테고리: ${post.categoryPath.join(" > ")}`);
 
-    if (!update && cached) {
+    if (!update && !useCache && cached) {
       skipped++;
       console.log(`이미 백업됨: ${post.logNo}\n`);
       continue;
@@ -112,6 +124,8 @@ async function backupPosts(blogId, posts, options = {}) {
         title: post.title,
         includePrivate,
         update,
+        useCache,
+        outputDir,
       });
 
       if (result.status === "new") {
@@ -145,14 +159,20 @@ async function backupPosts(blogId, posts, options = {}) {
 }
 
 function printBackupSummary(label, result, options = {}) {
-  const {update = false} = options;
+  const {update = false, useCache = false} = options;
 
   console.log(`${label} 백업 완료`);
   console.log(`전체: ${result.total}`);
   console.log(`신규: ${result.created}`);
   console.log(`업데이트: ${result.updated}`);
 
-  console.log(`${update ? "변경 없음" : "이미 백업됨"}: ${result.skipped}`);
+  if (update) {
+    console.log(`변경 없음: ${result.skipped}`);
+  } else if (useCache) {
+    console.log(`건너뜀: ${result.skipped}`);
+  } else {
+    console.log(`이미 백업됨: ${result.skipped}`);
+  }
 
   console.log(`실패: ${result.failed}`);
 
@@ -166,7 +186,13 @@ function printBackupSummary(label, result, options = {}) {
 }
 
 async function backupAllCategories(url, options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {
+    includePrivate = false,
+    update = false,
+    useCache = false,
+    outputDir = "",
+  } = options;
+
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
@@ -184,14 +210,26 @@ async function backupAllCategories(url, options = {}) {
 
   console.log(`전체 글 수: ${posts.length}`);
 
-  const result = await backupPosts(blogId, posts, {includePrivate, update});
-  printBackupSummary("블로그", result, {update});
+  const result = await backupPosts(blogId, posts, {
+    includePrivate,
+    update,
+    useCache,
+    outputDir,
+  });
+
+  printBackupSummary("블로그", result, {update, useCache});
 
   return result;
 }
 
 async function backupCategory(url, categoryName = "", options = {}) {
-  const {includePrivate = false, update = false} = options;
+  const {
+    includePrivate = false,
+    update = false,
+    useCache = false,
+    outputDir = "",
+  } = options;
+
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
@@ -204,45 +242,39 @@ async function backupCategory(url, categoryName = "", options = {}) {
   console.log("게시글 목록을 가져오는 중...");
 
   const posts = await getCategoryPosts(blogId, category, categories, {includePrivate});
-  const result = await backupPosts(blogId, posts, {includePrivate, update});
 
-  printBackupSummary("카테고리", result, {update});
+  const result = await backupPosts(blogId, posts, {
+    includePrivate,
+    update,
+    useCache,
+    outputDir,
+  });
+
+  printBackupSummary("카테고리", result, {update, useCache});
 
   return result;
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  const includePrivate = args.includes("--private");
-  const update = args.includes("--update");
-  const positionalArgs = args.filter(arg => !["--private", "--update"].includes(arg));
-  const url = positionalArgs[0];
-  const categoryName = positionalArgs[1] || "";
+if (require.main === module) {
+  runCli({
+    command: "c",
+    positional: '"네이버 블로그 URL" "카테고리명"',
 
-  if (!url) {
-    console.error(
-      '사용법: npm run category -- "네이버 블로그 URL" "카테고리명" [--private] [--update]'
-    );
-    process.exitCode = 1;
-    return;
-  }
+    validate: positional => Boolean(positional[0]),
 
-  try {
-    if (includePrivate) {
-      const {ensureLogin} = require("./src/auth");
-      await ensureLogin(parseBlogUrl(url).blogId);
-    }
+    getBlogId: positional => {
+      return parseBlogUrl(positional[0]).blogId;
+    },
 
-    await backupCategory(url, categoryName, {includePrivate, update});
-  } catch (error) {
-    console.error(error.message || error);
-    process.exitCode = 1;
-  } finally {
-    if (includePrivate) {
-      const {closeAuth} = require("./src/auth");
-      await closeAuth();
-    }
-  }
+    run: async args => {
+      await backupCategory(args.positional[0], args.positional[1] || "", {
+        includePrivate: args.includePrivate,
+        update: args.update,
+        useCache: args.useCache,
+        outputDir: args.outputDir,
+      });
+    },
+  });
 }
 
 module.exports = {
@@ -253,5 +285,3 @@ module.exports = {
   getAllPosts,
   getCategoryPathParts,
 };
-
-if (require.main === module) main();

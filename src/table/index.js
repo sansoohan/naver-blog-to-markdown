@@ -71,7 +71,9 @@ function protectTables($, root, store) {
      *
      * 조건을 통과하면 그때 전체 투명화한다.
      */
-    if (shouldMakeTableTransparent($, cloned)) {
+    const transparentTable = shouldMakeTableTransparent($, cloned);
+
+    if (transparentTable) {
       makeTableBackgroundTransparent($, cloned);
     }
 
@@ -82,10 +84,12 @@ function protectTables($, root, store) {
     normalizeLegacyTableWidths($, cloned);
 
     /*
-     * 표 자체에 기본 폰트색이 없으면
-     * 다크모드에서도 읽을 수 있도록 검은색을 기본값으로 지정한다.
+     * 투명화하지 않은 표에만 기본 폰트색을 지정한다.
+     *
+     * 투명화한 표는 원래의 고정 폰트색까지 제거한 상태이므로
+     * table에 color:#000을 다시 추가하면 안 된다.
      */
-    ensureLegacyTableFontColor(cloned);
+    if (!transparentTable) ensureLegacyTableFontColor(cloned);
 
     /*
      * 원본 구형 HTML에는 table 내부에

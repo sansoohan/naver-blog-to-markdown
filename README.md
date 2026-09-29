@@ -36,6 +36,13 @@ npm run blog -- "https://blog.naver.com/[네이버ID]" --private                
 # 수정된 글만 다시 백업
 npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --update  # 업데이트된 카테고리 글
 npm run blog -- "https://blog.naver.com/[네이버ID]" --update                   # 업데이트된 모든 글
+
+############### 개발자용 커멘드 ###############
+
+# 글(html/md)만 새로 작성하고 리소스(mp4/css/zip/jpg 등)는 재활용
+npm run page -- "https://blog.naver.com/[네이버ID]/[포스팅번호]" --cache       # 단일 글
+npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --cache # 카테고리 전체 글
+npm run blog -- "https://blog.naver.com/[네이버ID]" --cache                  # 모든 글
 ```
 
 처음 `--private` 실행 시 Chromium 창에서 직접 로그인합니다. 로그인 정보는 `.auth/naver-storage-state.json`에 저장되며, 유효한 동안 다음 실행에서는 재로그인하지 않습니다. 네이버 인증 정보를 초기화하거나 다른 계정으로 다시 로그인하기 위해서는 `.auth/` 폴더를 삭제해야 합니다.

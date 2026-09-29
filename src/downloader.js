@@ -4,11 +4,9 @@ const path = require("path");
 const {
   getResourceState,
   setResource,
-  setResources,
+  getResourceError,
   setResourceError,
-  getVideoState,
-  setVideo,
-  setVideoError,
+  clearResourceError,
   copyCachedFile,
 } = require("./backup-cache");
 
@@ -44,6 +42,26 @@ function getFilenameFromUrl(url, fallback = "download") {
   }
 }
 
+function getFilenameFromDisposition(value) {
+  const source = String(value || "").trim();
+
+  if (!source) return "";
+
+  const utf8 = source.match(/filename\*=UTF-8''([^;]+)/i);
+
+  if (utf8) {
+    try {
+      return safeFilename(decodeURIComponent(utf8[1]), "");
+    } catch {}
+  }
+
+  const normal = source.match(/filename="?([^";]+)"?/i);
+
+  if (!normal) return "";
+
+  return safeFilename(normal[1], "");
+}
+
 function getUniqueFilename(outputDir, filename) {
   const ext = path.extname(filename);
   const base = path.basename(filename, ext);
@@ -71,27 +89,68 @@ function getDestination(outputDir, filename, overwrite = false) {
   return path.resolve(outputDir, getUniqueFilename(outputDir, filename));
 }
 
-function getCacheAliases(url, options = {}) {
-  const aliases = [url, ...(options.cacheAliases || [])];
-  return [...new Set(aliases.map(normalizeUrl).filter(Boolean))];
+function getRequestSignal(options = {}) {
+  if (options.signal) return options.signal;
+  if (options.timeout > 0) return AbortSignal.timeout(options.timeout);
+  return undefined;
 }
 
-function saveResourceSuccess(urls, filePath) {
-  if (typeof setResources === "function") {
-    setResources(urls, filePath);
-    return;
+function getHeaderSize(response) {
+  const value = response.headers.get("content-length");
+
+  if (!value) return 0;
+
+  const size = Number(value);
+
+  return Number.isFinite(size) && size > 0 ? Math.trunc(size) : 0;
+}
+
+function getResponseEtag(response) {
+  return String(response.headers.get("etag") || "").trim();
+}
+
+function getOriginalFilename(url, response, options = {}) {
+  const disposition = response?.headers?.get("content-disposition") || "";
+  const dispositionFilename = getFilenameFromDisposition(disposition);
+
+  if (dispositionFilename) return dispositionFilename;
+
+  /*
+   * CSS처럼 호출부에서 filename을 명시한 경우에는
+   * 그것을 원본 리소스 이름으로 사용한다.
+   */
+  if (options.filename) {
+    return safeFilename(options.filename, options.fallbackFilename || "download");
   }
 
-  for (const url of urls) setResource(url, filePath);
+  return getFilenameFromUrl(response?.url || url, options.fallbackFilename || "download");
 }
 
-function copyCachedResource(cachedPath, url, options = {}) {
+function getResourceMetadata(url, response, options = {}) {
+  const size = getHeaderSize(response);
+
+  if (!size) return null;
+
+  const filename = getOriginalFilename(url, response, options);
+
+  if (!filename) return null;
+
+  return {
+    filename,
+    size,
+    etag: getResponseEtag(response) || null,
+  };
+}
+
+function copyCachedResource(cached, url, options = {}) {
   const {
     outputDir = "",
     filename = "",
     fallbackFilename = "download",
     overwrite = false,
   } = options;
+
+  const cachedPath = cached.path;
 
   if (!outputDir) {
     return {
@@ -101,6 +160,11 @@ function copyCachedResource(cachedPath, url, options = {}) {
       filename: path.basename(cachedPath),
       url,
       response: null,
+      resource: {
+        filename: cached.filename,
+        size: cached.size,
+        etag: cached.etag || null,
+      },
     };
   }
 
@@ -112,21 +176,35 @@ function copyCachedResource(cachedPath, url, options = {}) {
 
   /*
    * CSS처럼 파일명이 고정되어야 하는 리소스는 overwrite=true를 사용한다.
-   * 이 경우 copyCachedFile()의 _2, _3 이름 생성을 사용하지 않는다.
    */
   if (overwrite && filename) {
     destination = getExactDestination(outputDir, preferredName);
     finalFilename = preferredName;
 
-    if (path.resolve(cachedPath) !== destination) fs.copyFileSync(cachedPath, destination);
+    if (path.resolve(cachedPath) !== destination) {
+      fs.copyFileSync(cachedPath, destination);
+    }
   } else {
     finalFilename = copyCachedFile(cachedPath, outputDir, preferredName);
-    if (!finalFilename) throw new Error(`캐시 파일 재사용 실패: ${cachedPath}`);
+
+    if (!finalFilename) {
+      throw new Error(`캐시 파일 재사용 실패: ${cachedPath}`);
+    }
 
     destination = path.resolve(outputDir, finalFilename);
   }
 
-  saveResourceSuccess(getCacheAliases(url, options), destination);
+  /*
+   * --update에서는 기존 게시글 폴더에서 임시 폴더로
+   * 캐시 파일이 복사될 수 있다.
+   *
+   * 따라서 재사용 후 현재 파일 위치로 path를 갱신한다.
+   */
+  setResource({
+    filename: cached.filename,
+    size: cached.size,
+    etag: cached.etag || null,
+  }, destination);
 
   return {
     status: "cached",
@@ -135,6 +213,39 @@ function copyCachedResource(cachedPath, url, options = {}) {
     filename: finalFilename,
     url,
     response: null,
+    resource: {
+      filename: cached.filename,
+      size: cached.size,
+      etag: cached.etag || null,
+    },
+  };
+}
+
+async function fetchResourceMetadata(url, options = {}) {
+  const {
+    headers = {},
+    redirect = "follow",
+  } = options;
+
+  const fetchOptions = {
+    method: "HEAD",
+    headers,
+    redirect,
+  };
+
+  const signal = getRequestSignal(options);
+
+  if (signal) fetchOptions.signal = signal;
+
+  const response = await fetch(url, fetchOptions);
+
+  if (!response.ok) {
+    throw new Error(`HEAD HTTP ${response.status}`);
+  }
+
+  return {
+    response,
+    metadata: getResourceMetadata(url, response, options),
   };
 }
 
@@ -142,28 +253,40 @@ async function fetchResource(url, options = {}) {
   const {
     headers = {},
     redirect = "follow",
-    signal = null,
-    timeout = 0,
   } = options;
 
-  const fetchOptions = {headers, redirect};
+  const fetchOptions = {
+    headers,
+    redirect,
+  };
+
+  const signal = getRequestSignal(options);
 
   if (signal) fetchOptions.signal = signal;
-  else if (timeout > 0) fetchOptions.signal = AbortSignal.timeout(timeout);
 
   const response = await fetch(url, fetchOptions);
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
 
   const buffer = Buffer.from(await response.arrayBuffer());
 
-  if (!buffer.length) throw new Error("빈 응답");
+  if (!buffer.length) {
+    throw new Error("빈 응답");
+  }
 
-  return {buffer, response};
+  return {
+    buffer,
+    response,
+  };
 }
 
 async function prepareBuffer(buffer, response, url, options = {}) {
-  const {validate = null, transform = null} = options;
+  const {
+    validate = null,
+    transform = null,
+  } = options;
 
   if (validate) {
     await validate(buffer, {
@@ -205,7 +328,9 @@ async function resolveDownloadFilename(url, response, buffer, options = {}) {
     });
   }
 
-  if (!result) result = getFilenameFromUrl(response.url || url, fallbackFilename);
+  if (!result) {
+    result = getFilenameFromUrl(response.url || url, fallbackFilename);
+  }
 
   return safeFilename(result, fallbackFilename);
 }
@@ -213,46 +338,83 @@ async function resolveDownloadFilename(url, response, buffer, options = {}) {
 async function download(url, options = {}) {
   const source = normalizeUrl(url);
 
-  if (!source) throw new Error("다운로드 URL이 없습니다.");
+  if (!source) {
+    throw new Error("다운로드 URL이 없습니다.");
+  }
 
   const {
     outputDir = "",
-    fallbackFilename = "download",
     logLabel = "파일",
     overwrite = false,
     retries = 0,
   } = options;
 
   /*
-   * 다운로드 직전 영구 캐시 확인.
+   * 이전 실행에서 이 URL 자체가 실패했다면
+   * HEAD/GET을 포함한 모든 네트워크 요청을 생략한다.
    *
-   * ok    -> 네트워크 요청 없이 기존 파일 재사용
-   * error -> 이전 실패이므로 네트워크 요청 금지
-   * miss  -> 실제 다운로드
+   * 실패 cache만 URL 기반인 이유:
+   *
+   * 다운로드에 실패한 경우에는 원본 filename이나
+   * Content-Length를 얻지 못했을 수 있기 때문이다.
    */
-  const cached = getResourceState(source);
+  const previousError = getResourceError(source);
 
-  if (cached?.status === "ok") {
-    const result = copyCachedResource(cached.path, source, options);
-    console.log(`${logLabel} 캐시 재사용: ${result.filename}`);
-    return result;
+  if (previousError?.status === "error") {
+    throw new Error(
+      `이전 다운로드 실패로 재시도 안 함: ${source}`
+      + `${previousError.error ? ` - ${previousError.error}` : ""}`
+    );
   }
 
-  if (cached?.status === "error") {
-    throw new Error(`이전 ${logLabel} 다운로드 실패로 재시도 안 함: ${source} - ${cached.error}`);
+  /*
+   * GET 전에 HEAD를 보내 원격 리소스 metadata를 확인한다.
+   *
+   * HEAD
+   *   ↓
+   * filename + Content-Length + ETag
+   *   ↓
+   * resources cache 확인
+   *   ↓
+   * hit이면 GET 없이 기존 파일 재사용
+   *
+   * HEAD 자체가 실패하거나 Content-Length가 없는 것은
+   * 실제 파일 다운로드 실패로 간주하지 않는다.
+   *
+   * 일부 서버는 HEAD만 지원하지 않을 수도 있기 때문이다.
+   * 이 경우 그냥 정상 GET으로 넘어간다.
+   */
+  let headMetadata = null;
+
+  try {
+    const head = await fetchResourceMetadata(source, options);
+    headMetadata = head.metadata;
+  } catch {}
+
+  if (headMetadata) {
+    const cached = getResourceState(headMetadata);
+
+    if (cached?.status === "ok") {
+      const result = copyCachedResource(cached, source, options);
+
+      console.log(`${logLabel} 캐시 재사용: ${result.filename}`);
+
+      return result;
+    }
   }
 
-  let fetched;
+  let fetched = null;
   let fetchError = null;
   const retryCount = Math.max(0, Number(retries) || 0);
 
   /*
-   * 네트워크 요청/응답 자체가 실패하면 지정된 횟수만큼 재시도한다.
+   * 실제 GET이 실패한 경우에만 resourceErrors에 기록한다.
    *
-   * retries=0 -> 최초 1회
-   * retries=1 -> 최초 1회 + 재시도 1회
+   * retries=0
+   *   최초 1회
    *
-   * 모든 시도가 실패한 경우에만 error cache로 저장한다.
+   * retries=1
+   *   최초 1회 + 재시도 1회
    */
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
@@ -269,46 +431,111 @@ async function download(url, options = {}) {
     throw fetchError;
   }
 
-  let buffer;
+  /*
+   * GET 자체는 성공했으므로 과거 실패 기록이 존재한다면 제거한다.
+   *
+   * 일반적으로 위에서 실패 cache가 발견되면 GET을 하지 않기 때문에
+   * 여기까지 오는 경우는 거의 없지만,
+   * cache 정책이 바뀌거나 수동으로 일부 cache를 수정한 경우에도
+   * 상태가 일관되도록 해둔다.
+   */
+  clearResourceError(source);
 
   /*
-   * 응답 검증 실패도 해당 URL에서 올바른 리소스를 받지 못한 것이므로
-   * URL 실패로 기록한다.
+   * 반드시 transform 전에 원격 서버가 알려준 원본 크기를 보관한다.
+   *
+   * CSS처럼 transform되는 리소스는 이후 buffer.length가 바뀔 수 있으므로
+   * 변환된 buffer 크기를 resource size로 사용하면 안 된다.
    */
+  const remoteSize = getHeaderSize(fetched.response);
+  const remoteEtag = getResponseEtag(fetched.response);
+
+  let buffer;
+
   try {
-    buffer = await prepareBuffer(fetched.buffer, fetched.response, source, options);
+    buffer = await prepareBuffer(
+      fetched.buffer,
+      fetched.response,
+      source,
+      options
+    );
   } catch (error) {
+    /*
+     * GET은 성공했어도 validation/transform에 실패했다면
+     * 이 URL로부터 정상적인 로컬 리소스를 만들지 못한 것이므로
+     * 실패 cache에 기록한다.
+     */
     setResourceError(source, error);
     throw error;
   }
 
-  /*
-   * resolveFilename은 HTTP 응답을 확인한 뒤 실행한다.
-   *
-   * 첨부파일:
-   * Content-Disposition -> 실제 파일명
-   *
-   * 이미지:
-   * URL/Content-Type 등을 이용한 파일명 결정
-   *
-   * CSS:
-   * filename을 직접 지정하므로 resolveFilename 불필요
-   */
-  const resolvedFilename = await resolveDownloadFilename(source, fetched.response, buffer, options);
-
-  if (!outputDir) throw new Error(`${logLabel} outputDir이 없습니다.`);
-
-  const destination = getDestination(outputDir, resolvedFilename, overwrite);
-
-  fs.writeFileSync(destination, buffer);
-
-  const aliases = [
+  const resolvedFilename = await resolveDownloadFilename(
     source,
-    fetched.response.url,
-    ...(options.cacheAliases || []),
-  ];
+    fetched.response,
+    buffer,
+    options
+  );
 
-  saveResourceSuccess([...new Set(aliases.map(normalizeUrl).filter(Boolean))], destination);
+  if (!outputDir) {
+    throw new Error(`${logLabel} outputDir이 없습니다.`);
+  }
+
+  const destination = getDestination(
+    outputDir,
+    resolvedFilename,
+    overwrite
+  );
+
+  try {
+    fs.writeFileSync(destination, buffer);
+  } catch (error) {
+    /*
+     * 로컬 파일 쓰기 실패는 원격 URL 자체의 실패가 아니다.
+     *
+     * 따라서 resourceErrors에는 저장하지 않는다.
+     * 다음 실행에서 다시 시도할 수 있어야 한다.
+     */
+    throw error;
+  }
+
+  /*
+   * 성공 resource metadata:
+   *
+   * filename = 원격 리소스의 원본 파일명
+   * size     = 원격 GET 응답의 Content-Length
+   * etag     = 원격 서버가 제공한 ETag
+   * path     = 실제 로컬 저장 위치
+   *
+   * size는 buffer.length나 fs.stat().size로 대체하지 않는다.
+   *
+   * CSS처럼 transform되는 리소스는:
+   *
+   *   remoteSize !== buffer.length
+   *
+   * 일 수 있기 때문이다.
+   */
+  const originalFilename = getOriginalFilename(
+    source,
+    fetched.response,
+    options
+  );
+
+  const resourceMetadata = {
+    filename: originalFilename || resolvedFilename,
+    size: remoteSize,
+    etag: remoteEtag || null,
+  };
+
+  /*
+   * Content-Length를 제공하지 않는 서버라면
+   * filename + size라는 안정적인 성공 cache key를 만들 수 없다.
+   *
+   * 이 경우 파일 다운로드와 저장 자체는 정상적으로 완료하되
+   * resources에는 넣지 않는다.
+   */
+  if (resourceMetadata.size) {
+    setResource(resourceMetadata, destination);
+  }
 
   console.log(`${logLabel} 다운로드: ${path.basename(destination)}`);
 
@@ -319,16 +546,35 @@ async function download(url, options = {}) {
     filename: path.basename(destination),
     url: source,
     response: fetched.response,
+    resource: resourceMetadata.size ? resourceMetadata : null,
   };
 }
 
 async function downloadFirst(urls, options = {}) {
-  const candidates = [...new Set((urls || []).map(normalizeUrl).filter(Boolean))];
+  const candidates = [
+    ...new Set(
+      (urls || [])
+        .map(normalizeUrl)
+        .filter(Boolean)
+    ),
+  ];
 
-  if (!candidates.length) throw new Error("다운로드 후보 URL이 없습니다.");
+  if (!candidates.length) {
+    throw new Error("다운로드 후보 URL이 없습니다.");
+  }
 
   const failures = [];
 
+  /*
+   * 후보 URL별로 각각 download()를 호출한다.
+   *
+   * 따라서:
+   *
+   * URL A 실패 → A만 resourceErrors에 기록
+   * URL B 성공 → 정상 다운로드
+   *
+   * 다음 실행에서는 A는 즉시 건너뛰고 B를 확인한다.
+   */
   for (const url of candidates) {
     try {
       return await download(url, options);
@@ -358,7 +604,9 @@ async function fetchNaverVideoInfo(vid, inKey) {
     },
   });
 
-  if (!response.ok) throw new Error(`Naver VOD API 실패: HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`Naver VOD API 실패: HTTP ${response.status}`);
+  }
 
   return response.json();
 }
@@ -366,7 +614,9 @@ async function fetchNaverVideoInfo(vid, inKey) {
 function findBestMp4(data) {
   const videos = data?.videos?.list;
 
-  if (!Array.isArray(videos) || !videos.length) return "";
+  if (!Array.isArray(videos) || !videos.length) {
+    return "";
+  }
 
   const results = videos
     .filter(video => typeof video.source === "string" && /^https?:\/\//i.test(video.source))
@@ -399,7 +649,12 @@ function findPoster(data) {
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return normalizeUrl(candidate);
+    if (
+      typeof candidate === "string"
+      && /^https?:\/\//i.test(candidate)
+    ) {
+      return normalizeUrl(candidate);
+    }
   }
 
   let result = "";
@@ -410,6 +665,7 @@ function findPoster(data) {
     if (Array.isArray(value)) {
       for (const child of value) {
         walk(child);
+
         if (result) return;
       }
 
@@ -471,44 +727,11 @@ async function resolveNaverVideo(candidates) {
     }
   }
 
-  if (lastError) throw lastError;
-
-  throw new Error("사용 가능한 Naver 동영상 메타데이터가 없습니다.");
-}
-
-function reuseCachedVideo(cached, vid, metadata, outputDir) {
-  fs.mkdirSync(outputDir, {recursive: true});
-
-  const videoFilename = copyCachedFile(cached.videoPath, outputDir, path.basename(cached.videoPath));
-
-  if (!videoFilename) throw new Error(`동영상 캐시 파일이 없습니다: ${vid}`);
-
-  const videoPath = path.resolve(outputDir, videoFilename);
-  let posterFilename = "";
-  let posterPath = "";
-
-  if (cached.posterPath) {
-    posterFilename = copyCachedFile(cached.posterPath, outputDir, path.basename(cached.posterPath));
-
-    if (posterFilename) posterPath = path.resolve(outputDir, posterFilename);
+  if (lastError) {
+    throw lastError;
   }
 
-  setVideo(vid, videoPath, posterPath);
-
-  console.log(`동영상 캐시 재사용: ${videoFilename}`);
-
-  return {
-    status: "cached",
-    cached: true,
-    vid,
-    metadata,
-    videoPath,
-    videoFilename,
-    posterPath,
-    posterFilename,
-    posterUrl: "",
-    info: null,
-  };
+  throw new Error("사용 가능한 Naver 동영상 메타데이터가 없습니다.");
 }
 
 async function downloadNaverVideo(candidates, options = {}) {
@@ -521,86 +744,73 @@ async function downloadNaverVideo(candidates, options = {}) {
     throw new Error("Naver 동영상 메타데이터가 없습니다.");
   }
 
-  if (!outputDir) throw new Error("Naver 동영상 outputDir이 없습니다.");
-
-  const vids = [...new Set(
-    candidates
-      .map(candidate => String(candidate?.vid || "").trim())
-      .filter(Boolean)
-  )];
-
-  if (!vids.length) throw new Error("Naver 동영상 vid가 없습니다.");
-
-  /*
-   * VOD API보다 먼저 vid cache를 확인한다.
-   *
-   * 같은 vid가 이미 성공:
-   * VOD API 호출 안 함.
-   *
-   * 같은 vid가 이전에 실패:
-   * VOD API 호출 안 함.
-   */
-  for (const vid of vids) {
-    const cached = getVideoState(vid);
-    const metadata = candidates.find(candidate => String(candidate?.vid || "").trim() === vid) || candidates[0];
-
-    if (cached?.status === "ok") return reuseCachedVideo(cached, vid, metadata, outputDir);
-
-    if (cached?.status === "error") {
-      throw new Error(`이전 동영상 다운로드 실패로 재시도 안 함: ${vid} - ${cached.error}`);
-    }
+  if (!outputDir) {
+    throw new Error("Naver 동영상 outputDir이 없습니다.");
   }
 
-  let resolved;
-
   /*
-   * vid cache miss일 때 VOD API를 호출한다.
+   * videos 전용 영구 cache는 사용하지 않는다.
+   *
+   * vid/inKey는 현재 MP4 URL을 얻기 위한 식별자로만 사용한다.
+   *
+   * 실제 MP4 파일은 이미지/CSS/첨부파일/poster와 동일하게
+   * 일반 resources cache에서 관리한다.
    */
-  try {
-    resolved = await resolveNaverVideo(candidates);
-  } catch (error) {
-    for (const vid of vids) setVideoError(vid, error);
-    throw error;
-  }
+  const resolved = await resolveNaverVideo(candidates);
 
-  const {metadata, info, videoUrl, posterUrl} = resolved;
+  const {
+    metadata,
+    info,
+    videoUrl,
+    posterUrl,
+  } = resolved;
+
   const vid = String(metadata.vid || "").trim();
 
-  let fallback = safeFilename(fallbackFilename, "video.mp4");
+  let fallback = safeFilename(
+    fallbackFilename,
+    "video.mp4"
+  );
 
-  if (!path.extname(fallback)) fallback += ".mp4";
-
-  let videoResult;
-
-  /*
-   * MP4 URL을 얻은 뒤에도 바로 fetch하지 않는다.
-   *
-   * 반드시 일반 download()를 통과시켜서
-   * 최종 MP4 URL의 resource cache도 검사한다.
-   */
-  try {
-    videoResult = await download(videoUrl, {
-      outputDir,
-      fallbackFilename: fallback,
-      logLabel: "동영상",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Referer: "https://blog.naver.com/",
-      },
-      resolveFilename: ({url, response}) => {
-        let filename = getFilenameFromUrl(response.url || url, fallback);
-
-        if (!path.extname(filename)) filename += ".mp4";
-
-        return filename;
-      },
-    });
-  } catch (error) {
-    for (const candidateVid of vids) setVideoError(candidateVid, error);
-    throw error;
+  if (!path.extname(fallback)) {
+    fallback += ".mp4";
   }
 
-  setVideo(vid, videoResult.path, "");
+  /*
+   * VOD API에서 현재 MP4 URL을 얻은 뒤
+   * 반드시 일반 download()를 통과시킨다.
+   *
+   * 따라서 MP4도:
+   *
+   *   HEAD
+   *     ↓
+   *   filename + size + ETag
+   *     ↓
+   *   resources cache
+   *
+   * 구조를 그대로 사용한다.
+   */
+  const videoResult = await download(videoUrl, {
+    outputDir,
+    fallbackFilename: fallback,
+    logLabel: "동영상",
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Referer: "https://blog.naver.com/",
+    },
+    resolveFilename: ({url, response}) => {
+      let filename = getFilenameFromUrl(
+        response.url || url,
+        fallback
+      );
+
+      if (!path.extname(filename)) {
+        filename += ".mp4";
+      }
+
+      return filename;
+    },
+  });
 
   return {
     status: videoResult.status,
@@ -616,16 +826,29 @@ async function downloadNaverVideo(candidates, options = {}) {
   };
 }
 
-function setNaverVideoPoster(vid, videoPath, posterPath) {
-  if (!vid || !videoPath) return;
-  setVideo(vid, videoPath, posterPath || "");
-}
+/*
+ * 이전에는 video cache에서:
+ *
+ *   vid → video + poster
+ *
+ * 관계를 저장하기 위해 사용했다.
+ *
+ * videos cache를 제거했으므로 더 이상 별도 저장하지 않는다.
+ *
+ * poster 파일 자체는 video.js에서 일반 download()를 통과하므로
+ * 자동으로 resources cache에 들어간다.
+ *
+ * 기존 video.js 호출부를 수정하지 않아도 되도록
+ * 함수 자체만 호환용으로 남겨둔다.
+ */
+function setNaverVideoPoster() {}
 
 module.exports = {
   download,
   downloadFirst,
   downloadNaverVideo,
   setNaverVideoPoster,
+
   normalizeUrl,
   safeFilename,
   getFilenameFromUrl,

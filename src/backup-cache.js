@@ -9,7 +9,7 @@ const CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
  *
  * downloader.js는 게시글 구조를 알 필요가 없다.
  * backup-page.js가 HTML 생성 직전에 context를 지정하고,
- * 모든 resource/video cache 접근은 이 게시글 안에서만 이루어진다.
+ * 모든 resource cache 접근은 이 게시글 안에서만 이루어진다.
  */
 let activeContext = null;
 
@@ -214,28 +214,65 @@ function checkBackupCache() {
 /*
  * 게시글별 리소스 캐시
  *
- * backup-cache.json:
+ * 성공:
  *
- * {
- *   "blogId/logNo": {
- *     ...
- *     "resources": {
- *       "URL": {
- *         "status": "ok",
- *         "path": "image.png"
- *       }
- *     },
- *     "videos": {
- *       "vid": {
- *         "status": "ok",
- *         "video": "video.mp4",
- *         "poster": "poster.jpg"
- *       }
- *     }
- *   }
- * }
+ *   resources
  *
- * path/video/poster는 게시글 폴더 기준 상대경로다.
+ * 이미지 / 첨부파일 / CSS / MP4 / poster 등
+ * 실제 다운로드되는 모든 파일을 여기서 관리한다.
+ *
+ * 성공 resource key:
+ *
+ *   원본 filename + 원격 원본 size
+ *
+ * 예:
+ *
+ *   photo.jpg:583921
+ *
+ *
+ * 중요:
+ *
+ * size는 로컬 저장 파일의 크기가 아니다.
+ *
+ * HEAD:
+ *   Content-Length
+ *
+ * Range:
+ *   Content-Range의 전체 크기
+ *
+ * GET:
+ *   Content-Length
+ *   없으면 transform 전 raw response buffer.length
+ *
+ * 를 사용한다.
+ *
+ * CSS처럼 다운로드 후 transform되는 파일은
+ * 원격 크기와 로컬 크기가 달라질 수 있으므로
+ * fs.stat(file).size와 비교하면 안 된다.
+ *
+ *
+ * ETag:
+ *
+ * 양쪽 모두 존재하면 ETag까지 같아야 cache hit.
+ * 한쪽이라도 없으면 filename + size만으로 판단한다.
+ *
+ *
+ * 실패:
+ *
+ *   resourceErrors
+ *
+ * 실패 시 filename/size를 알 수 없을 수 있으므로
+ * URL을 key로 저장한다.
+ *
+ * 한 번 실패한 URL은 이후 실행에서
+ * HEAD / Range / GET을 전부 하지 않는다.
+ *
+ *
+ * useCache:
+ *
+ * 기존 cache를 읽어서 재사용할지 여부만 의미한다.
+ *
+ * 성공/실패 결과 기록은 useCache와 관계없이 항상 한다.
  */
 
 function setResourceContext(cacheKey, outputDir, useCache = false) {
@@ -244,7 +281,11 @@ function setResourceContext(cacheKey, outputDir, useCache = false) {
   if (!key) throw new Error("리소스 캐시 게시글 키가 없습니다.");
   if (!outputDir) throw new Error("리소스 캐시 게시글 경로가 없습니다.");
 
-  activeContext = {cacheKey: key, outputDir: path.resolve(outputDir), useCache: Boolean(useCache)};
+  activeContext = {
+    cacheKey: key,
+    outputDir: path.resolve(outputDir),
+    useCache: Boolean(useCache),
+  };
 }
 
 function clearResourceContext() {
@@ -264,8 +305,30 @@ function isResourceCacheEnabled() {
   return Boolean(activeContext?.useCache);
 }
 
-function normalizeResourceKey(value) {
-  return String(value || "").trim().replace(/&amp;/g, "&");
+function normalizeResourceFilename(value) {
+  return String(value || "").trim();
+}
+
+function normalizeResourceSize(value) {
+  const size = Number(value);
+  return Number.isFinite(size) && size > 0 ? Math.trunc(size) : 0;
+}
+
+function normalizeEtag(value) {
+  return String(value || "").trim();
+}
+
+function normalizeResourceUrl(value) {
+  return String(value || "").trim();
+}
+
+function makeResourceKey(filename, size) {
+  const normalizedFilename = normalizeResourceFilename(filename);
+  const normalizedSize = normalizeResourceSize(size);
+
+  if (!normalizedFilename || !normalizedSize) return "";
+
+  return `${normalizedFilename}:${normalizedSize}`;
 }
 
 function ensurePostCache(cache, cacheKey) {
@@ -273,8 +336,17 @@ function ensurePostCache(cache, cacheKey) {
 
   const entry = cache[cacheKey];
 
-  if (!entry.resources || typeof entry.resources !== "object" || Array.isArray(entry.resources)) entry.resources = {};
-  if (!entry.videos || typeof entry.videos !== "object" || Array.isArray(entry.videos)) entry.videos = {};
+  if (!entry.resources || typeof entry.resources !== "object" || Array.isArray(entry.resources)) {
+    entry.resources = {};
+  }
+
+  if (
+    !entry.resourceErrors
+    || typeof entry.resourceErrors !== "object"
+    || Array.isArray(entry.resourceErrors)
+  ) {
+    entry.resourceErrors = {};
+  }
 
   return entry;
 }
@@ -312,11 +384,14 @@ function fromPostRelativePath(storedPath) {
   return path.resolve(context.outputDir, String(storedPath || ""));
 }
 
-function getResourceState(url) {
+function getResourceState(metadata) {
   if (!isResourceCacheEnabled()) return null;
 
   const context = requireResourceContext();
-  const key = normalizeResourceKey(url);
+  const filename = normalizeResourceFilename(metadata?.filename);
+  const size = normalizeResourceSize(metadata?.size);
+  const etag = normalizeEtag(metadata?.etag);
+  const key = makeResourceKey(filename, size);
 
   if (!key) return null;
 
@@ -331,22 +406,22 @@ function getResourceState(url) {
 
   const item = resources[key];
 
-  if (!item) return null;
-
-  if (item.status === "error") {
-    return {
-      key,
-      status: "error",
-      error: String(item.error || "다운로드 실패"),
-      failedAt: item.failedAt || "",
-      item,
-    };
-  }
-
+  if (!item || typeof item !== "object") return null;
   if (!item.path) return null;
+
+  const cachedEtag = normalizeEtag(item.etag);
+
+  if (etag && cachedEtag && etag !== cachedEtag) return null;
 
   const filePath = fromPostRelativePath(item.path);
 
+  /*
+   * resource의 size는 원격 원본 크기이므로
+   * 로컬 파일의 fs.stat().size와 비교하지 않는다.
+   *
+   * CSS처럼 다운로드 후 transform되는 리소스는
+   * 로컬 크기가 원본 Content-Length와 달라질 수 있다.
+   */
   if (!isExistingFile(filePath)) return null;
 
   return {
@@ -354,21 +429,26 @@ function getResourceState(url) {
     status: "ok",
     path: filePath,
     storedPath: item.path,
-    updatedAt: item.updatedAt || "",
+    filename: item.filename || filename,
+    size,
+    etag: cachedEtag,
     item,
   };
 }
 
-function getResource(url) {
-  const state = getResourceState(url);
+function getResource(metadata) {
+  const state = getResourceState(metadata);
   return state?.status === "ok" ? state : null;
 }
 
-function setResource(url, filePath) {
-  if (!isResourceCacheEnabled()) return;
+function setResource(metadata, filePath) {
+  if (!activeContext) return;
 
   const context = requireResourceContext();
-  const key = normalizeResourceKey(url);
+  const filename = normalizeResourceFilename(metadata?.filename);
+  const size = normalizeResourceSize(metadata?.size);
+  const etag = normalizeEtag(metadata?.etag);
+  const key = makeResourceKey(filename, size);
 
   if (!key || !filePath) return;
 
@@ -376,47 +456,85 @@ function setResource(url, filePath) {
   const entry = ensurePostCache(cache, context.cacheKey);
 
   entry.resources[key] = {
-    status: "ok",
+    filename,
+    size,
+    etag: etag || null,
     path: toPostRelativePath(filePath),
-    updatedAt: new Date().toISOString(),
   };
 
   saveBackupCache(cache);
 }
 
-function setResources(urls, filePath) {
-  if (!isResourceCacheEnabled()) return;
+function setResources(metadataList, filePath) {
+  if (!activeContext) return;
+  if (!Array.isArray(metadataList) || !metadataList.length || !filePath) return;
 
   const context = requireResourceContext();
-  const keys = [...new Set((urls || []).map(normalizeResourceKey).filter(Boolean))];
-
-  if (!keys.length || !filePath) return;
-
   const cache = loadBackupCache();
   const entry = ensurePostCache(cache, context.cacheKey);
   const storedPath = toPostRelativePath(filePath);
-  const updatedAt = new Date().toISOString();
 
-  for (const key of keys) {
-    entry.resources[key] = {status: "ok", path: storedPath, updatedAt};
+  for (const metadata of metadataList) {
+    const filename = normalizeResourceFilename(metadata?.filename);
+    const size = normalizeResourceSize(metadata?.size);
+    const etag = normalizeEtag(metadata?.etag);
+    const key = makeResourceKey(filename, size);
+
+    if (!key) continue;
+
+    entry.resources[key] = {
+      filename,
+      size,
+      etag: etag || null,
+      path: storedPath,
+    };
   }
 
   saveBackupCache(cache);
 }
 
-function setResourceError(url, error) {
-  if (!isResourceCacheEnabled()) return;
+function getResourceError(url) {
+  if (!isResourceCacheEnabled()) return null;
 
   const context = requireResourceContext();
-  const key = normalizeResourceKey(url);
+  const source = normalizeResourceUrl(url);
 
-  if (!key) return;
+  if (!source) return null;
+
+  const cache = loadBackupCache();
+  const entry = cache[context.cacheKey];
+
+  if (!entry || typeof entry !== "object") return null;
+
+  const errors = entry.resourceErrors;
+
+  if (!errors || typeof errors !== "object") return null;
+
+  const item = errors[source];
+
+  if (!item || typeof item !== "object") return null;
+
+  return {
+    status: "error",
+    url: source,
+    error: String(item.error || "다운로드 실패"),
+    failedAt: item.failedAt || "",
+    item,
+  };
+}
+
+function setResourceError(url, error) {
+  if (!activeContext) return;
+
+  const context = requireResourceContext();
+  const source = normalizeResourceUrl(url);
+
+  if (!source) return;
 
   const cache = loadBackupCache();
   const entry = ensurePostCache(cache, context.cacheKey);
 
-  entry.resources[key] = {
-    status: "error",
+  entry.resourceErrors[source] = {
     error: String(error?.message || error || "다운로드 실패"),
     failedAt: new Date().toISOString(),
   };
@@ -425,121 +543,45 @@ function setResourceError(url, error) {
 }
 
 function setResourcesError(urls, error) {
-  if (!isResourceCacheEnabled()) return;
+  if (!activeContext) return;
+  if (!Array.isArray(urls) || !urls.length) return;
 
   const context = requireResourceContext();
-  const keys = [...new Set((urls || []).map(normalizeResourceKey).filter(Boolean))];
-
-  if (!keys.length) return;
-
   const cache = loadBackupCache();
   const entry = ensurePostCache(cache, context.cacheKey);
-  const message = String(error?.message || error || "다운로드 실패");
   const failedAt = new Date().toISOString();
+  const message = String(error?.message || error || "다운로드 실패");
 
-  for (const key of keys) {
-    entry.resources[key] = {status: "error", error: message, failedAt};
+  for (const url of urls) {
+    const source = normalizeResourceUrl(url);
+
+    if (!source) continue;
+
+    entry.resourceErrors[source] = {
+      error: message,
+      failedAt,
+    };
   }
 
   saveBackupCache(cache);
 }
 
-function getVideoState(vid) {
-  if (!isResourceCacheEnabled()) return null;
+function clearResourceError(url) {
+  if (!activeContext) return;
 
   const context = requireResourceContext();
-  const key = String(vid || "").trim();
+  const source = normalizeResourceUrl(url);
 
-  if (!key) return null;
+  if (!source) return;
 
   const cache = loadBackupCache();
   const entry = cache[context.cacheKey];
 
-  if (!entry || typeof entry !== "object") return null;
+  if (!entry || typeof entry !== "object") return;
+  if (!entry.resourceErrors || typeof entry.resourceErrors !== "object") return;
+  if (!Object.prototype.hasOwnProperty.call(entry.resourceErrors, source)) return;
 
-  const videos = entry.videos;
-
-  if (!videos || typeof videos !== "object") return null;
-
-  const item = videos[key];
-
-  if (!item) return null;
-
-  if (item.status === "error") {
-    return {
-      vid: key,
-      status: "error",
-      error: String(item.error || "다운로드 실패"),
-      failedAt: item.failedAt || "",
-      item,
-    };
-  }
-
-  if (!item.video) return null;
-
-  const videoPath = fromPostRelativePath(item.video);
-
-  if (!isExistingFile(videoPath)) return null;
-
-  let posterPath = "";
-
-  if (item.poster) {
-    const candidate = fromPostRelativePath(item.poster);
-    if (isExistingFile(candidate)) posterPath = candidate;
-  }
-
-  return {
-    vid: key,
-    status: "ok",
-    videoPath,
-    posterPath,
-    updatedAt: item.updatedAt || "",
-    item,
-  };
-}
-
-function getVideo(vid) {
-  const state = getVideoState(vid);
-  return state?.status === "ok" ? state : null;
-}
-
-function setVideo(vid, videoPath, posterPath = "") {
-  if (!isResourceCacheEnabled()) return;
-
-  const context = requireResourceContext();
-  const key = String(vid || "").trim();
-
-  if (!key || !videoPath) return;
-
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
-
-  entry.videos[key] = {
-    status: "ok",
-    video: toPostRelativePath(videoPath),
-    poster: posterPath ? toPostRelativePath(posterPath) : "",
-    updatedAt: new Date().toISOString(),
-  };
-
-  saveBackupCache(cache);
-}
-
-function setVideoError(vid, error) {
-  if (!isResourceCacheEnabled()) return;
-
-  const context = requireResourceContext();
-  const key = String(vid || "").trim();
-
-  if (!key) return;
-
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
-
-  entry.videos[key] = {
-    status: "error",
-    error: String(error?.message || error || "다운로드 실패"),
-    failedAt: new Date().toISOString(),
-  };
+  delete entry.resourceErrors[source];
 
   saveBackupCache(cache);
 }
@@ -559,7 +601,9 @@ function copyCachedFile(sourcePath, destinationDir, preferredName = "") {
       const sourceStat = fs.statSync(sourcePath);
       const destinationStat = fs.statSync(destinationPath);
 
-      if (sourceStat.isFile() && destinationStat.isFile() && sourceStat.size === destinationStat.size) return filename;
+      if (sourceStat.isFile() && destinationStat.isFile() && sourceStat.size === destinationStat.size) {
+        return filename;
+      }
     } catch {}
 
     const ext = path.extname(filename);
@@ -578,8 +622,8 @@ function copyCachedFile(sourcePath, destinationDir, preferredName = "") {
 }
 
 /*
- * 이제 리소스 경로는 게시글 폴더 기준 상대경로이므로
- * 게시글 폴더가 이동해도 resources/videos 수정이 필요 없다.
+ * 리소스 경로는 게시글 폴더 기준 상대경로이므로
+ * 게시글 폴더가 이동해도 resources 수정이 필요 없다.
  *
  * 기존 호출부 호환을 위해 함수는 남겨둔다.
  */
@@ -599,13 +643,11 @@ module.exports = {
   getResource,
   setResource,
   setResources,
+
+  getResourceError,
   setResourceError,
   setResourcesError,
-
-  getVideoState,
-  getVideo,
-  setVideo,
-  setVideoError,
+  clearResourceError,
 
   copyCachedFile,
   relocateResourcePaths,

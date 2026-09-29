@@ -1,71 +1,179 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const cheerio = require("cheerio");
-
-const {makeHtml, getPostRoot, detectEditorVersion} = require("./src/make-html");
-const {makeMarkdown} = require("./src/make-markdown");
 const {fetchNaver} = require("./src/naver-request");
-const {loadBackupCache, saveBackupCache, setResourceContext, clearResourceContext} = require("./src/backup-cache");
-const {createContentHash} = require("./src/content-hash");
-const {safeFilename, normalizeText} = require("./src/filename");
+const {makeHtml, detectEditorVersion} = require("./src/make-html");
+const {makeMarkdown} = require("./src/make-markdown");
+const {
+  loadBackupCache,
+  saveBackupCache,
+  setResourceContext,
+  clearResourceContext,
+} = require("./src/backup-cache");
+const {runCli} = require("./src/cli");
 
-const OUTPUT_ROOT = path.join(process.cwd(), "output");
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
 
-function extractPostCategoryNo($) {
-  const selectors = [".blog2_series a[href*='categoryNo=']", "span.cate a[href*='categoryNo=']"];
-
-  for (const selector of selectors) {
-    const href = $(selector).first().attr("href") || "";
-    const match = href.match(/[?&]categoryNo=(\d+)/i);
-    if (match && match[1] !== "0") return match[1];
-  }
-
-  throw new Error("게시글 HTML에서 현재 카테고리 번호를 찾을 수 없습니다.");
+function safeFilename(value) {
+  return normalizeText(value)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 150);
 }
 
 function parsePostUrl(url) {
-  const parsed = new URL(url);
+  const value = String(url || "").trim();
 
-  let blogId = parsed.searchParams.get("blogId");
-  let logNo = parsed.searchParams.get("logNo");
+  let match = value.match(/blog\.naver\.com\/([^/?#]+)\/(\d+)/i);
 
-  if (!blogId || !logNo) {
-    const parts = parsed.pathname.split("/").filter(Boolean);
-
-    if (parts.length >= 2) {
-      blogId = parts[0];
-      logNo = parts[1];
-    }
+  if (match) {
+    return {
+      blogId: match[1],
+      logNo: match[2],
+    };
   }
 
-  if (!blogId || !logNo) throw new Error("네이버 블로그 글 URL을 확인할 수 없습니다.");
+  match = value.match(/[?&]blogId=([^&#]+).*?[?&]logNo=(\d+)/i);
 
-  return {blogId, logNo: String(logNo)};
+  if (match) {
+    return {
+      blogId: decodeURIComponent(match[1]),
+      logNo: match[2],
+    };
+  }
+
+  throw new Error("네이버 블로그 글 URL 형식이 아닙니다.");
 }
 
 async function getPost(blogId, logNo, options = {}) {
   const {includePrivate = false} = options;
+
   const url = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}`
     + `&logNo=${encodeURIComponent(logNo)}`;
 
   const response = await fetchNaver(url, {
     private: includePrivate,
     browser: includePrivate,
-    headers: {"User-Agent": "Mozilla/5.0", Referer: `https://blog.naver.com/${blogId}`},
+    headers: {
+      Referer: `https://blog.naver.com/${blogId}/${logNo}`,
+    },
   });
 
-  if (response.status >= 300 && response.status < 400) {
-    throw new Error(`게시글이 리다이렉트되었습니다: ${response.status} ${response.url}`);
+  if (!response.ok) {
+    throw new Error(`게시글 요청 실패: HTTP ${response.status}`);
   }
-
-  if (!response.ok) throw new Error(`게시글 요청 실패: ${response.status}`);
 
   return response.text();
 }
 
+function getPostRoot($) {
+  const selectors = [
+    "#postListBody",
+    ".se-main-container",
+    "#postViewArea",
+    ".post-view",
+  ];
+
+  for (const selector of selectors) {
+    const element = $(selector).first();
+
+    if (element.length) return element;
+  }
+
+  throw new Error("게시글 본문을 찾을 수 없습니다.");
+}
+
+function createContentHash(root) {
+  const clone = root.clone();
+
+  clone.find("script, style").remove();
+
+  clone.find("*").each((_, element) => {
+    const $element = clone.find(element);
+
+    for (const attribute of Object.keys(element.attribs || {})) {
+      if (
+        attribute.startsWith("data-")
+        || attribute === "id"
+        || attribute === "class"
+        || attribute === "style"
+      ) {
+        continue;
+      }
+    }
+  });
+
+  const source = clone.html() || "";
+  const hash = crypto.createHash("sha256").update(source).digest("hex");
+
+  return {hash, source};
+}
+
+function extractPostCategoryNo($) {
+  /*
+   * SmartEditor 1/2 구형 게시글.
+   *
+   * categoryNo=0은 실제 게시글 카테고리가 아니므로 무시한다.
+   */
+  const selectors = [
+    ".blog2_series a[href*='categoryNo=']",
+    "span.cate a[href*='categoryNo=']",
+  ];
+
+  for (const selector of selectors) {
+    const href = $(selector).first().attr("href") || "";
+    const match = href.match(/[?&]categoryNo=(\d+)/i);
+
+    if (match && match[1] !== "0") return match[1];
+  }
+
+  /*
+   * 신형 게시글 및 메타데이터.
+   */
+  const candidates = [
+    $("#postListBody .post-view").attr("data-categoryno"),
+    $("meta[property='naverblog:categoryNo']").attr("content"),
+    $("meta[name='naverblog:categoryNo']").attr("content"),
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+
+    if (/^\d+$/.test(value) && value !== "0") return value;
+  }
+
+  /*
+   * 마지막 fallback.
+   *
+   * HTML 안에 들어 있는 categoryNo를 찾되
+   * categoryNo=0은 무시한다.
+   */
+  const html = $.html();
+
+  const patterns = [
+    /categoryNo["']?\s*[:=]\s*["']?(\d+)/i,
+    /categoryNo=(\d+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match && match[1] !== "0") return match[1];
+  }
+
+  throw new Error("게시글 카테고리 번호를 찾을 수 없습니다.");
+}
+
 function removeDirectory(directory) {
   if (!directory || !fs.existsSync(directory)) return;
-  fs.rmSync(directory, {recursive: true, force: true});
+
+  fs.rmSync(directory, {
+    recursive: true,
+    force: true,
+  });
 }
 
 function copyDirectory(source, destination) {
@@ -74,7 +182,7 @@ function copyDirectory(source, destination) {
   fs.mkdirSync(destination, {recursive: true});
 
   for (const entry of fs.readdirSync(source, {withFileTypes: true})) {
-    if (entry.name === "original.html" || entry.name === "index.md" || entry.name === "metadata.json") continue;
+    if (entry.name === "metadata.json") continue;
 
     const sourcePath = path.join(source, entry.name);
     const destinationPath = path.join(destination, entry.name);
@@ -114,7 +222,6 @@ function backupExists(outputDir) {
   if (!outputDir || !fs.existsSync(outputDir)) return false;
   if (!fs.existsSync(path.join(outputDir, "original.html"))) return false;
   if (!fs.existsSync(path.join(outputDir, "index.md"))) return false;
-  if (!fs.existsSync(path.join(outputDir, "metadata.json"))) return false;
 
   return true;
 }
@@ -160,9 +267,12 @@ async function convertPost(blogId, logNo, options = {}) {
     title: suppliedTitle = "",
     includePrivate = false,
     update = false,
+    useCache = false,
+    outputDir = "",
   } = options;
 
-  const useCache = update;
+  const reuseResources = update || useCache;
+  const outputRoot = outputDir ? path.resolve(outputDir) : path.join(process.cwd(), "output");
 
   blogId = String(blogId);
   logNo = String(logNo);
@@ -199,7 +309,7 @@ async function convertPost(blogId, logNo, options = {}) {
 
   const category = normalizedCategoryParts.join(" > ");
   const folderName = `${logNo}_${safeFilename(title)}`;
-  const finalOutputDir = path.join(OUTPUT_ROOT, ...normalizedCategoryParts.map(safeFilename), folderName);
+  const finalOutputDir = path.join(outputRoot, ...normalizedCategoryParts.map(safeFilename), folderName);
   const relativePath = path.relative(process.cwd(), finalOutputDir);
   const previousOutputDir = previous?.path ? path.resolve(process.cwd(), previous.path) : null;
 
@@ -224,18 +334,9 @@ async function convertPost(blogId, logNo, options = {}) {
     };
   }
 
-  /*
-   * 일반 실행:
-   * 기존 리소스를 복사하지 않고 빈 temp에서 시작한다.
-   * downloader의 캐시도 비활성화되므로 모든 리소스를 새로 다운로드한다.
-   *
-   * --update:
-   * 기존 게시글 폴더 전체를 temp로 복사한 다음
-   * original.html / index.md / metadata.json만 삭제하고 다시 만든다.
-   */
   let resourceSourceDir = "";
 
-  if (update) {
+  if (reuseResources) {
     if (previousOutputDir && fs.existsSync(previousOutputDir)) {
       resourceSourceDir = previousOutputDir;
     } else if (fs.existsSync(finalOutputDir)) {
@@ -243,7 +344,7 @@ async function convertPost(blogId, logNo, options = {}) {
     }
   }
 
-  const tempOutputDir = path.join(OUTPUT_ROOT, ".tmp", `${blogId}_${logNo}_${Date.now()}`);
+  const tempOutputDir = path.join(outputRoot, ".tmp", `${blogId}_${logNo}_${Date.now()}`);
 
   removeDirectory(tempOutputDir);
   fs.mkdirSync(tempOutputDir, {recursive: true});
@@ -257,56 +358,40 @@ async function convertPost(blogId, logNo, options = {}) {
       if (fs.existsSync(previousHtmlPath)) previousHtml = fs.readFileSync(previousHtmlPath, "utf8");
 
       copyDirectory(resourceSourceDir, tempOutputDir);
-
-      fs.rmSync(path.join(tempOutputDir, "original.html"), {force: true});
-      fs.rmSync(path.join(tempOutputDir, "index.md"), {force: true});
-      fs.rmSync(path.join(tempOutputDir, "metadata.json"), {force: true});
     }
 
-    setResourceContext(cacheKey, tempOutputDir, useCache);
+    setResourceContext(cacheKey, tempOutputDir, reuseResources);
 
     console.log(`HTML 생성 중: ${title}`);
 
     const originalHtml = await makeHtml(rawHtml, tempOutputDir, {
       blogId,
       logNo,
-      title,
       editorVersion,
       previousHtml,
     });
 
-    const hashSourceFilename = `.hash-source-${contentHash.slice(0, 16)}.html`;
-    const hashSourcePath = path.join(tempOutputDir, hashSourceFilename);
-
-    if (!fs.existsSync(hashSourcePath)) fs.writeFileSync(hashSourcePath, hashSource, "utf8");
-
     fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
-
-    const metadata = {
-      title,
-      sourceUrl: `https://blog.naver.com/${blogId}/${logNo}`,
-    };
-
-    fs.writeFileSync(
-      path.join(tempOutputDir, "metadata.json"),
-      `${JSON.stringify(metadata, null, 2)}\n`,
-      "utf8"
-    );
 
     console.log("Markdown 생성 중...");
 
-    const markdown = await makeMarkdown(originalHtml, {editorVersion});
+    const markdown = makeMarkdown(originalHtml, {
+      sourceUrl: `https://blog.naver.com/${blogId}/${logNo}`,
+      title,
+      editorVersion,
+    });
 
     fs.writeFileSync(path.join(tempOutputDir, "index.md"), markdown, "utf8");
 
-    if (!backupExists(tempOutputDir)) {
-      throw new Error("임시 백업 폴더에 original.html, index.md 또는 metadata.json이 생성되지 않았습니다.");
-    }
+    fs.writeFileSync(
+      path.join(tempOutputDir, "metadata.json"),
+      `${JSON.stringify({
+        title,
+        url: `https://blog.naver.com/${blogId}/${logNo}`,
+      }, null, 2)}\n`,
+      "utf8"
+    );
 
-    /*
-     * HTML 생성 중 downloader가 backup-cache.json을 갱신할 수 있으므로
-     * 저장 직전에 최신 cache를 다시 읽는다.
-     */
     cache = loadBackupCache();
 
     const currentEntry = cache[cacheKey] && typeof cache[cacheKey] === "object" ? cache[cacheKey] : {};
@@ -315,14 +400,10 @@ async function convertPost(blogId, logNo, options = {}) {
       ? currentEntry.resources
       : {};
 
-    const videos = currentEntry.videos && typeof currentEntry.videos === "object" ? currentEntry.videos : {};
+    const resourceErrors = currentEntry.resourceErrors && typeof currentEntry.resourceErrors === "object"
+      ? currentEntry.resourceErrors
+      : {};
 
-    /*
-     * temp → 최종 게시글 폴더.
-     *
-     * resources/videos에는 게시글 루트 기준 상대경로만 들어 있으므로
-     * temp 폴더가 final 폴더로 이동해도 캐시 수정은 필요 없다.
-     */
     if (previousOutputDir && path.resolve(previousOutputDir) !== path.resolve(finalOutputDir)) {
       console.log(`저장 경로 변경: ${previous.path} → ${relativePath}`);
       removeDirectory(previousOutputDir);
@@ -343,7 +424,7 @@ async function convertPost(blogId, logNo, options = {}) {
       path: relativePath,
       backedUpAt: new Date().toISOString(),
       resources,
-      videos,
+      resourceErrors,
     };
 
     if (legacyKey && legacyKey !== cacheKey) delete cache[legacyKey];
@@ -371,48 +452,29 @@ async function convertPost(blogId, logNo, options = {}) {
   }
 }
 
-function parseArgs(argv) {
-  const args = argv.slice(2);
-  const includePrivate = args.includes("--private");
-  const update = args.includes("--update");
-  const positional = args.filter(arg => !["--private", "--update"].includes(arg));
+if (require.main === module) {
+  runCli({
+    command: "p",
+    positional: '"네이버 블로그 글 URL"',
 
-  if (!positional.length) {
-    throw new Error('사용법: npm run page -- "네이버 블로그 글 URL" [--private] [--update]');
-  }
+    validate: positional => Boolean(positional[0]),
 
-  return {url: positional[0], includePrivate, update};
-}
+    getBlogId: positional => {
+      return parsePostUrl(positional[0]).blogId;
+    },
 
-async function main() {
-  let includePrivate = false;
+    run: async args => {
+      const {blogId, logNo} = parsePostUrl(args.positional[0]);
 
-  try {
-    const args = parseArgs(process.argv);
-
-    includePrivate = args.includePrivate;
-
-    const {blogId, logNo} = parsePostUrl(args.url);
-
-    if (includePrivate) {
-      const {ensureLogin} = require("./src/auth");
-      await ensureLogin(blogId);
-    }
-
-    await convertPost(blogId, logNo, {
-      skipUnchanged: args.update,
-      includePrivate,
-      update: args.update,
-    });
-  } catch (error) {
-    console.error(error.message || error);
-    process.exitCode = 1;
-  } finally {
-    if (includePrivate) {
-      const {closeAuth} = require("./src/auth");
-      await closeAuth();
-    }
-  }
+      await convertPost(blogId, logNo, {
+        skipUnchanged: args.update,
+        includePrivate: args.includePrivate,
+        update: args.update,
+        useCache: args.useCache,
+        outputDir: args.outputDir,
+      });
+    },
+  });
 }
 
 module.exports = {
@@ -423,5 +485,3 @@ module.exports = {
   extractPostCategoryNo,
   resolvePostCategoryPath,
 };
-
-if (require.main === module) main();

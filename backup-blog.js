@@ -1,42 +1,32 @@
 const {backupAllCategories, parseBlogUrl} = require("./backup-category");
+const {runCli} = require("./src/cli");
 
 async function backupBlog(blogUrl, options = {}) {
   return backupAllCategories(blogUrl, options);
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  const includePrivate = args.includes("--private");
-  const update = args.includes("--update");
-  const positional = args.filter(arg => !["--private", "--update"].includes(arg));
-  const blogUrl = positional[0];
+if (require.main === module) {
+  runCli({
+    command: "b",
+    positional: '"블로그 URL"',
 
-  if (!blogUrl) {
-    console.error('사용법: npm run blog -- "블로그 URL" [--private] [--update]');
-    process.exitCode = 1;
-    return;
-  }
+    validate: positional => Boolean(positional[0]),
 
-  try {
-    if (includePrivate) {
-      const {ensureLogin} = require("./src/auth");
-      await ensureLogin(parseBlogUrl(blogUrl).blogId);
-    }
+    getBlogId: positional => {
+      return parseBlogUrl(positional[0]).blogId;
+    },
 
-    await backupBlog(blogUrl, {includePrivate, update});
-  } catch (error) {
-    console.error(error.stack || error.message);
-    process.exitCode = 1;
-  } finally {
-    if (includePrivate) {
-      const {closeAuth} = require("./src/auth");
-      await closeAuth();
-    }
-  }
+    run: async args => {
+      await backupBlog(args.positional[0], {
+        includePrivate: args.includePrivate,
+        update: args.update,
+        useCache: args.useCache,
+        outputDir: args.outputDir,
+      });
+    },
+  });
 }
 
 module.exports = {
   backupBlog,
 };
-
-if (require.main === module) main();
