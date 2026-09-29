@@ -609,12 +609,55 @@ async function downloadFromImageSources(imageManager, sources, options) {
   return {filename: "", source: ""};
 }
 
+async function localizeLegacyGifVideos($, root, imageManager) {
+  const videos = root.find("video._gifmp4[data-gif-url]").add(root.filter("video._gifmp4[data-gif-url]")).toArray();
+
+  for (const element of videos) {
+    const video = $(element);
+    const url = video.attr("data-gif-url") || "";
+
+    if (!url) continue;
+
+    let filename;
+
+    try {
+      filename = await imageManager.download(url, {
+        highResolution: true,
+        fallbackPrefix: "image",
+      });
+    } catch (error) {
+      console.warn(`GIF 이미지 다운로드 실패: ${url}`);
+      console.warn(error.message);
+      continue;
+    }
+
+    if (!filename) continue;
+
+    const image = $("<img>");
+
+    image.attr("src", `./${filename}`);
+    image.attr("class", video.attr("class") || "");
+
+    const id = video.attr("id");
+    const alt = video.attr("alt");
+
+    if (id) image.attr("id", id);
+    if (alt) image.attr("alt", alt);
+
+    image.attr("style", "display:block;max-width:100%;height:auto;");
+
+    video.replaceWith(image);
+  }
+}
+
 async function localizeImages($, root, imageManager, options = {}) {
   const {
     editorVersion = 0,
     previous$ = null,
     previousRoot = null,
   } = options;
+
+  await localizeLegacyGifVideos($, root, imageManager);
 
   const images = root.find("img").add(root.filter("img")).toArray();
 
@@ -623,6 +666,9 @@ async function localizeImages($, root, imageManager, options = {}) {
 
     // Naver 동영상 poster는 video.js에서 별도로 처리한다.
     if (image.closest(".se-component.se-video").length) continue;
+
+    // 이미 로컬화된 이미지는 다시 다운로드하지 않는다.
+    if (getLocalImageFilename(image)) continue;
 
     const sources = getImageSources(image);
     if (!sources.length) continue;
