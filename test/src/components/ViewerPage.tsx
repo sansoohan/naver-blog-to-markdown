@@ -19,6 +19,11 @@ type ViewerPageProps = {
   postId?: string;
 };
 
+type ScrollPosition = {
+  x: number;
+  y: number;
+};
+
 function ViewerPage({ posts, postId }: ViewerPageProps) {
   const navigate = useNavigate();
   const { removeParagraphMargins, darkMode, fancyCheckboxes } = useAppSettings();
@@ -56,6 +61,71 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     return posts.filter(post => post.category === currentPost.category);
   }, [posts, currentPost]);
 
+  const getScrollStorageKey = (postId: string, viewer: "original" | "markdown") => {
+    return `viewerScroll:${postId}:${viewer}`;
+  };
+
+  const saveScrollPosition = (
+    postId: string,
+    viewer: "original" | "markdown",
+    frame: HTMLIFrameElement | null
+  ) => {
+    const frameWindow = frame?.contentWindow;
+
+    if (!frameWindow) return;
+
+    const position: ScrollPosition = {
+      x: frameWindow.scrollX,
+      y: frameWindow.scrollY,
+    };
+
+    sessionStorage.setItem(
+      getScrollStorageKey(postId, viewer),
+      JSON.stringify(position)
+    );
+  };
+
+  const restoreScrollPosition = (
+    postId: string,
+    viewer: "original" | "markdown",
+    frame: HTMLIFrameElement
+  ) => {
+    const saved = sessionStorage.getItem(getScrollStorageKey(postId, viewer));
+
+    if (!saved) return;
+
+    try {
+      const position = JSON.parse(saved) as ScrollPosition;
+
+      if (
+        typeof position.x !== "number" ||
+        typeof position.y !== "number"
+      ) {
+        return;
+      }
+
+      frame.contentWindow?.scrollTo(position.x, position.y);
+    } catch {
+      sessionStorage.removeItem(getScrollStorageKey(postId, viewer));
+    }
+  };
+
+  const saveCurrentScrollPositions = () => {
+    if (!currentPost) return;
+
+    saveScrollPosition(
+      currentPost.id,
+      "original",
+      originalFrameRef.current
+    );
+
+    saveScrollPosition(
+      currentPost.id,
+      "markdown",
+      markdownFrameRef.current
+    );
+  };
+
   useEffect(() => {
     if (!currentPost) return;
     localStorage.setItem(LAST_VIEWED_POST_KEY, currentPost.id);
@@ -66,7 +136,20 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     setMarkdownLoaded(false);
   }, [currentPost?.id, refreshKey]);
 
+  useEffect(() => {
+    const handlePageHide = () => {
+      saveCurrentScrollPositions();
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [currentPost]);
+
   const goToPost = (post: PostInfo) => {
+    saveCurrentScrollPositions();
     navigate(getPostRoute(post.id));
   };
 
@@ -97,6 +180,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
   };
 
   const refresh = () => {
+    saveCurrentScrollPositions();
     setRefreshKey(key => key + 1);
   };
 
@@ -181,6 +265,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         event.preventDefault();
 
         if (currentIndex > 0) {
+          saveCurrentScrollPositions();
           navigate(getPostRoute(posts[currentIndex - 1].id));
         }
       }
@@ -189,6 +274,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         event.preventDefault();
 
         if (currentIndex >= 0 && currentIndex < posts.length - 1) {
+          saveCurrentScrollPositions();
           navigate(getPostRoute(posts[currentIndex + 1].id));
         }
       }
@@ -199,7 +285,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [posts, currentIndex, navigate, settingsOpen]);
+  }, [posts, currentIndex, navigate, settingsOpen, currentPost]);
 
   return (
     <div className="app d-flex flex-column w-100 vh-100 bg-body text-body">
@@ -297,6 +383,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
                     if (!document) return;
 
                     applyOriginalSettings(document, darkMode);
+                    restoreScrollPosition(currentPost.id, "original", event.currentTarget);
                     setOriginalLoaded(true);
                   }}
                 />
@@ -397,6 +484,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
                       fancyCheckboxes
                     );
 
+                    restoreScrollPosition(currentPost.id, "markdown", event.currentTarget);
                     setMarkdownLoaded(true);
                   }}
                 />
