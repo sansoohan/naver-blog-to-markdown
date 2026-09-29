@@ -4,10 +4,10 @@ import { useAppSettings } from "../contexts/AppSettingsContext";
 import type { PostInfo } from "../types/post";
 import { getPostRoute } from "../utils/route";
 import { applyMarkdownSettings, applyOriginalSettings } from "../utils/settings";
-import SettingsModal from "./SettingsModal";
+import SettingsPanel from "./SettingsPanel";
 import Toolbar from "./Toolbar";
 
-const DEFAULT_MARKDOWN_ZOOM = 80;
+const DEFAULT_MARKDOWN_ZOOM = 90;
 const MIN_MARKDOWN_ZOOM = 50;
 const MAX_MARKDOWN_ZOOM = 150;
 const MARKDOWN_ZOOM_STEP = 5;
@@ -98,6 +98,28 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
 
   const refresh = () => {
     setRefreshKey(key => key + 1);
+  };
+
+  const openPostFolder = async () => {
+    if (!currentPost) return;
+
+    try {
+      const response = await fetch("/api/post/open-folder", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          path: currentPost.relativePath,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`글 폴더 열기 실패: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const getOriginalUrl = (post: PostInfo) => {
@@ -195,18 +217,53 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         onSettings={() => setSettingsOpen(true)}
       />
 
-      <main className="compare-view flex-grow-1 bg-body text-body">
-        <section className="viewer d-flex flex-column bg-body">
+      <div className="post-title-bar d-flex align-items-center flex-shrink-0 gap-2 px-3 border-bottom bg-body">
+        {currentPost ? (
+          <>
+            <span className="fw-semibold text-truncate">
+              {currentPost.title || currentPost.folderName}
+            </span>
+
+            {currentPost.sourceUrl && (
+              <a
+                href={currentPost.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-link btn-sm p-0 text-secondary flex-shrink-0"
+                title="원본 글 열기"
+                aria-label="원본 글 열기"
+              >
+                <i className="bi bi-box-arrow-up-right"></i>
+              </a>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-link btn-sm p-0 text-secondary flex-shrink-0"
+              onClick={openPostFolder}
+              title="글 폴더 열기"
+              aria-label="글 폴더 열기"
+            >
+              <i className="bi bi-folder2-open"></i>
+            </button>
+          </>
+        ) : (
+          <span className="text-secondary small">선택된 게시글이 없습니다.</span>
+        )}
+      </div>
+
+      <main className="compare-view d-flex flex-grow-1 bg-body text-body">
+        <section className="viewer d-flex flex-column flex-fill bg-body">
           <div
             className={
-              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 " +
-              "border-bottom bg-body-tertiary fw-semibold"
+              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 " +
+              "px-3 border-bottom bg-body-tertiary fw-semibold"
             }
           >
             <span>original.html</span>
 
             {currentPost && !currentPost.hasHtml && (
-              <span className="missing-file text-danger fw-normal">파일 없음</span>
+              <span className="small text-danger fw-normal">파일 없음</span>
             )}
           </div>
 
@@ -218,7 +275,12 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             ) : currentPost.hasHtml ? (
               <>
                 {!originalLoaded && (
-                  <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center text-secondary small">
+                  <div
+                    className={
+                      "position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center " +
+                      "justify-content-center text-secondary small"
+                    }
+                  >
                     페이지 준비 중...
                   </div>
                 )}
@@ -226,7 +288,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
                 <iframe
                   ref={originalFrameRef}
                   key={`${currentPost.id}-html-${refreshKey}`}
-                  className={`viewer-frame ${originalLoaded ? "visible" : "invisible"}`}
+                  className={`viewer-frame w-100 h-100 border-0 ${originalLoaded ? "visible" : "invisible"}`}
                   src={getOriginalUrl(currentPost)}
                   title="Original HTML"
                   onLoad={event => {
@@ -247,46 +309,53 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
           </div>
         </section>
 
-        <section className="viewer d-flex flex-column border-start bg-body">
+        <section className="viewer d-flex flex-column flex-fill border-start bg-body">
           <div
             className={
-              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 py-2 " +
-              "border-bottom bg-body-tertiary fw-semibold"
+              "viewer-header d-flex align-items-center justify-content-between flex-shrink-0 " +
+              "px-3 border-bottom bg-body-tertiary fw-semibold"
             }
           >
             <span>index.md</span>
 
             <div className="d-flex align-items-center gap-2 ms-auto">
               <button
-                className="btn btn-outline-secondary btn-sm"
+                type="button"
+                className="btn btn-outline-secondary btn-sm icon-button"
                 onClick={() => changeMarkdownZoom(-MARKDOWN_ZOOM_STEP)}
                 disabled={!currentPost || markdownZoom <= MIN_MARKDOWN_ZOOM}
                 title="축소"
+                aria-label="축소"
               >
-                −
+                <i className="bi bi-dash-lg"></i>
               </button>
 
-              <span className="zoom-value text-center">{markdownZoom}%</span>
+              <span className="zoom-value text-center small">{markdownZoom}%</span>
 
               <button
-                className="btn btn-outline-secondary btn-sm"
+                type="button"
+                className="btn btn-outline-secondary btn-sm icon-button"
                 onClick={() => changeMarkdownZoom(MARKDOWN_ZOOM_STEP)}
                 disabled={!currentPost || markdownZoom >= MAX_MARKDOWN_ZOOM}
                 title="확대"
+                aria-label="확대"
               >
-                +
+                <i className="bi bi-plus-lg"></i>
               </button>
 
               <button
-                className="btn btn-outline-secondary btn-sm"
+                type="button"
+                className="btn btn-outline-secondary btn-sm icon-button"
                 onClick={resetMarkdownZoom}
                 disabled={!currentPost || markdownZoom === DEFAULT_MARKDOWN_ZOOM}
+                title="배율 초기화"
+                aria-label="배율 초기화"
               >
-                초기화
+                <i className="bi bi-arrow-counterclockwise"></i>
               </button>
 
               {currentPost && !currentPost.hasMarkdown && (
-                <span className="missing-file text-danger fw-normal">파일 없음</span>
+                <span className="small text-danger fw-normal">파일 없음</span>
               )}
             </div>
           </div>
@@ -299,7 +368,12 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
             ) : currentPost.hasMarkdown ? (
               <>
                 {!markdownLoaded && (
-                  <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center text-secondary small">
+                  <div
+                    className={
+                      "position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center " +
+                      "justify-content-center text-secondary small"
+                    }
+                  >
                     페이지 준비 중...
                   </div>
                 )}
@@ -307,7 +381,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
                 <iframe
                   ref={markdownFrameRef}
                   key={`${currentPost.id}-markdown-${refreshKey}`}
-                  className={`viewer-frame ${markdownLoaded ? "visible" : "invisible"}`}
+                  className={`viewer-frame w-100 h-100 border-0 ${markdownLoaded ? "visible" : "invisible"}`}
                   src={getMarkdownUrl(currentPost)}
                   title="Markdown"
                   onLoad={event => {
@@ -336,7 +410,7 @@ function ViewerPage({ posts, postId }: ViewerPageProps) {
         </section>
       </main>
 
-      <SettingsModal show={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsPanel show={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

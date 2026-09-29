@@ -1,6 +1,7 @@
 import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { scanPosts } from "./src/post-scanner.js";
 import markdown from "./src/markdown/index.js";
@@ -95,6 +96,61 @@ app.get("/api/posts", async (_request, response) => {
 
     response.status(500).json({
       error: "output 폴더를 읽는 중 오류가 발생했습니다.",
+    });
+  }
+});
+
+app.post("/api/post/open-folder", async (request, response) => {
+  try {
+    const relativePath = request.body?.path;
+
+    if (typeof relativePath !== "string") {
+      response.status(400).json({
+        error: "path가 필요합니다.",
+      });
+      return;
+    }
+
+    const postDirectory = resolvePostDirectory(relativePath);
+
+    if (!postDirectory) {
+      response.status(400).json({
+        error: "잘못된 경로입니다.",
+      });
+      return;
+    }
+
+    const stat = await fs.stat(postDirectory);
+
+    if (!stat.isDirectory()) {
+      response.status(404).json({
+        error: "게시글 폴더를 찾을 수 없습니다.",
+      });
+      return;
+    }
+
+    if (process.platform !== "win32") {
+      response.status(501).json({
+        error: "현재 폴더 열기는 Windows에서만 지원합니다.",
+      });
+      return;
+    }
+
+    const explorer = spawn("explorer.exe", [postDirectory], {
+      detached: true,
+      stdio: "ignore",
+    });
+
+    explorer.unref();
+
+    response.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error(error);
+
+    response.status(500).json({
+      error: "게시글 폴더를 여는 중 오류가 발생했습니다.",
     });
   }
 });

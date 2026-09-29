@@ -29,26 +29,38 @@ function Toolbar({
   onSettings,
 }: ToolbarProps) {
   return (
-    <header className="toolbar align-items-center gap-3 flex-shrink-0 px-3 py-2 border-bottom">
-      <div className="d-flex align-items-center gap-2">
-        <button className="btn btn-outline-secondary btn-sm" onClick={onPrevious} disabled={currentIndex <= 0}>
-          ← 이전
+    <header className="toolbar d-flex align-items-center gap-3 flex-shrink-0 px-3 py-2 border-bottom bg-body">
+      <SearchBox posts={posts} onSelectPost={onSelectPost} />
+
+      <div className="d-flex align-items-center gap-2 flex-shrink-0">
+        <button
+          type="button"
+          className="btn btn-outline-secondary btn-sm icon-button"
+          onClick={onPrevious}
+          disabled={currentIndex <= 0}
+          title="이전 게시글"
+          aria-label="이전 게시글"
+        >
+          <i className="bi bi-chevron-left"></i>
         </button>
 
-        <span className="text-center text-nowrap small" style={{ minWidth: 70 }}>
+        <span className="post-counter text-center text-nowrap small">
           {currentPost ? `${currentIndex + 1} / ${posts.length}` : `0 / ${posts.length}`}
         </span>
 
         <button
-          className="btn btn-outline-secondary btn-sm"
+          type="button"
+          className="btn btn-outline-secondary btn-sm icon-button"
           onClick={onNext}
           disabled={currentIndex < 0 || currentIndex === posts.length - 1}
+          title="다음 게시글"
+          aria-label="다음 게시글"
         >
-          다음 →
+          <i className="bi bi-chevron-right"></i>
         </button>
       </div>
 
-      <div className="post-selector gap-2">
+      <div className="d-flex align-items-center gap-2 flex-grow-1 min-width-0">
         <select
           className="form-select form-select-sm category-select"
           value={currentPost?.category ?? ""}
@@ -66,7 +78,7 @@ function Toolbar({
         </select>
 
         <select
-          className="form-select form-select-sm post-select"
+          className="form-select form-select-sm flex-grow-1 min-width-0"
           value={currentPost?.id ?? ""}
           onChange={event => onSelectPost(event.target.value)}
           disabled={posts.length === 0}
@@ -82,15 +94,26 @@ function Toolbar({
         </select>
       </div>
 
-      <div className="d-flex align-items-center gap-2">
-        <SearchBox />
-
-        <button className="btn btn-outline-secondary btn-sm" onClick={onRefresh} disabled={!currentPost}>
-          새로고침
+      <div className="d-flex align-items-center gap-2 flex-shrink-0">
+        <button
+          type="button"
+          className="btn btn-outline-secondary btn-sm icon-button"
+          onClick={onRefresh}
+          disabled={!currentPost}
+          title="새로고침"
+          aria-label="새로고침"
+        >
+          <i className="bi bi-arrow-clockwise"></i>
         </button>
 
-        <button className="btn btn-outline-secondary btn-sm" onClick={onSettings}>
-          설정
+        <button
+          type="button"
+          className="btn btn-outline-secondary btn-sm icon-button"
+          onClick={onSettings}
+          title="설정"
+          aria-label="설정"
+        >
+          <i className="bi bi-gear"></i>
         </button>
       </div>
     </header>

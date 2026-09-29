@@ -6,9 +6,45 @@ export type PostInfo = {
   category: string;
   folderName: string;
   relativePath: string;
+  title: string;
+  sourceUrl: string;
   hasHtml: boolean;
   hasMarkdown: boolean;
 };
+
+type PostMetadata = {
+  title?: string;
+  sourceUrl?: string;
+};
+
+async function readMetadata(directory: string): Promise<PostMetadata> {
+  try {
+    const source = await fs.readFile(path.join(directory, "metadata.json"), "utf8");
+    const metadata = JSON.parse(source);
+
+    if (!metadata || typeof metadata !== "object") return {};
+
+    return {
+      title: typeof metadata.title === "string" ? metadata.title : undefined,
+      sourceUrl: typeof metadata.sourceUrl === "string" ? metadata.sourceUrl : undefined,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return {};
+    }
+
+    if (error instanceof SyntaxError) {
+      console.warn(`metadata.json 파싱 실패: ${path.join(directory, "metadata.json")}`);
+      return {};
+    }
+
+    throw error;
+  }
+}
 
 export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
   const posts: PostInfo[] = [];
@@ -29,12 +65,16 @@ export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
       const relativePath = path.relative(outputRoot, directory);
       const normalizedPath = relativePath.replaceAll("\\", "/");
       const parts = normalizedPath.split("/");
+      const folderName = parts.at(-1) ?? "";
+      const metadata = await readMetadata(directory);
 
       posts.push({
         id: normalizedPath,
         category: parts.slice(0, -1).join("/"),
-        folderName: parts.at(-1) ?? "",
+        folderName,
         relativePath: normalizedPath,
+        title: metadata.title || folderName,
+        sourceUrl: metadata.sourceUrl || "",
         hasHtml,
         hasMarkdown,
       });
