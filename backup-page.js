@@ -17,6 +17,10 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function decodeHtmlEntities(value) {
+  return cheerio.load(`<body>${String(value || "")}</body>`).text();
+}
+
 function safeFilename(value) {
   return normalizeText(value)
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
@@ -295,7 +299,8 @@ async function convertPost(blogId, logNo, options = {}) {
     || normalizeText($(".se-title-text").first().text())
     || normalizeText($(".itemSubjectBoldfont").first().text());
 
-  const title = normalizeText(suppliedTitle) || detectedTitle || normalizeText(previous?.title) || String(logNo);
+  const rawTitle = normalizeText(suppliedTitle) || detectedTitle || normalizeText(previous?.title) || String(logNo);
+  const title = normalizeText(decodeHtmlEntities(rawTitle));
 
   let normalizedCategoryParts = [];
 
