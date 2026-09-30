@@ -51,10 +51,6 @@ function getCellBackgroundColor(cell) {
   return "";
 }
 
-function getActualText(node) {
-  return node.text().replace(/\u200b/g, "").replace(/\u00a0/g, " ").trim();
-}
-
 function normalizeStyleColor(value) {
   return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
 }
@@ -62,105 +58,96 @@ function normalizeStyleColor(value) {
 /*
  * 표 전체를 투명화할 수 있는지 판정한다.
  *
+ * table 자체와 내부의 모든 요소를 검사한다.
+ *
+ * 배경색이 두 종류 이상이거나
+ * 폰트색이 두 종류 이상이면
+ * 원본의 색상 구분에 의미가 있다고 보고 투명화하지 않는다.
+ *
  * 이 함수에서는 DOM을 절대로 수정하지 않는다.
- * 원본의 배경색 / 폰트색 / 글자 배경색만 검사한다.
  */
 function shouldMakeTableTransparent($, table) {
-  /*
-   * 1단계:
-   *
-   * 모든 셀의 실제 배경색을 검사한다.
-   *
-   * CSS background/background-color가 있으면
-   * bgcolor보다 CSS가 우선한다.
-   *
-   * 투명 또는 배경 미지정은 __none__으로 취급한다.
-   */
-  const cellBackgroundColors = new Set();
-
-  table.find("th, td").each((_, element) => {
-    const cell = $(element);
-    const backgroundColor = getCellBackgroundColor(cell);
-
-    cellBackgroundColors.add(
-      backgroundColor
-        ? normalizeStyleColor(backgroundColor)
-        : "__none__"
-    );
-  });
-
-  /*
-   * 2단계:
-   *
-   * 글자 서식을 검사한다.
-   */
+  const backgroundColors = new Set();
   const fontColors = new Set();
-  let hasTextBackgroundColor = false;
 
-  /*
-   * td / th / p / div 같은 부모 요소의 background-color를
-   * 글자 배경색으로 오인하지 않는다.
-   *
-   * 실제 글자가 있는 span만 검사한다.
-   */
-  table.find("span").each((_, element) => {
+  table.find("*").addBack().each((_, element) => {
     const node = $(element);
-
-    if (!getActualText(node)) return;
-
     const style = node.attr("style") || "";
-    const colorMatch = style.match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
-
-    if (colorMatch) {
-      fontColors.add(normalizeStyleColor(colorMatch[1]));
-    }
 
     /*
-     * 실제 글자 span 자체에 배경색이 지정되어 있으면
-     * 표 전체 투명화 대상에서 제외한다.
+     * background-color
      */
     const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
 
-    if (backgroundColorMatch && normalizeStyleColor(backgroundColorMatch[1]) !== "transparent") {
-      hasTextBackgroundColor = true;
+    if (backgroundColorMatch) {
+      const color = normalizeStyleColor(backgroundColorMatch[1]);
+
+      if (color && color !== "transparent") {
+        backgroundColors.add(color);
+      }
+    } else {
+      /*
+       * background shorthand
+       */
+      const backgroundMatch = style.match(
+        /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
+      );
+
+      if (backgroundMatch) {
+        const color = normalizeStyleColor(backgroundMatch[1]);
+
+        if (color && color !== "transparent") {
+          backgroundColors.add(color);
+        }
+      } else {
+        /*
+         * CSS background가 지정되지 않은 경우에만
+         * 구형 HTML bgcolor를 사용한다.
+         */
+        const bgcolor = node.attr("bgcolor");
+
+        if (bgcolor) {
+          const color = normalizeStyleColor(bgcolor);
+
+          if (color && color !== "transparent") {
+            backgroundColors.add(color);
+          }
+        }
+      }
     }
 
-    const backgroundMatch = style.match(
-      /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
-    );
+    /*
+     * CSS color
+     */
+    const colorMatch = style.match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
 
-    if (backgroundMatch && normalizeStyleColor(backgroundMatch[1]) !== "transparent") {
-      hasTextBackgroundColor = true;
-    }
-  });
+    if (colorMatch) {
+      const color = normalizeStyleColor(colorMatch[1]);
 
-  /*
-   * 구형 HTML의 <font color="...">도
-   * 폰트색 판정에 포함한다.
-   */
-  table.find("font[color]").each((_, element) => {
-    const node = $(element);
+      if (color) {
+        fontColors.add(color);
+      }
+    } else {
+      /*
+       * 구형 HTML의 color 속성도 검사한다.
+       */
+      const color = node.attr("color");
 
-    if (!getActualText(node)) return;
-
-    const color = node.attr("color");
-
-    if (color) {
-      fontColors.add(normalizeStyleColor(color));
+      if (color) {
+        fontColors.add(normalizeStyleColor(color));
+      }
     }
   });
 
   /*
    * 최종 조건:
    *
-   * 1. 모든 셀의 실제 배경색이 동일함
-   * 2. 지정된 폰트색이 없거나 전부 동일함
-   * 3. 실제 글자 자체에 별도 배경색이 없음
+   * 1. 명시된 배경색이 없거나 전부 동일함
+   * 2. 명시된 폰트색이 없거나 전부 동일함
    */
   return (
-    cellBackgroundColors.size <= 1
+    backgroundColors.size <= 1
     && fontColors.size <= 1
-    && !hasTextBackgroundColor
   );
 }
 
