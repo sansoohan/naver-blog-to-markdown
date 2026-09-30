@@ -1,7 +1,54 @@
 const crypto = require("crypto");
 
+function getPostBody(root) {
+  /*
+   * [해시 대상 - 게시글 본문]
+   *
+   * 콘텐츠 해시는 게시글의 실제 본문만 대상으로 한다.
+   * 제목, 작성자, 작성일, 카테고리, 공유, 신고, 공감, 댓글, 태그 등
+   * 게시글 주변의 네이버 UI는 처음부터 해시 대상에 포함하지 않는다.
+   *
+   * 현대 에디터:
+   *   .se-main-container
+   *
+   * 구형 에디터:
+   *   #postViewArea
+   *
+   * 중요:
+   * 본문 선택자를 찾지 못했다고 root 전체를 fallback으로 사용하지 말 것.
+   * root 전체에는 게시글과 관계없는 네이버 UI와 동적 값이 포함될 수 있으므로
+   * 잘못된 해시를 만드는 것보다 명시적으로 실패하는 편이 안전하다.
+   */
+  const selectors = [
+    ".se-main-container",
+    "#postViewArea",
+  ];
+
+  for (const selector of selectors) {
+    if (root.is(selector)) return root;
+
+    const body = root.find(selector).first();
+
+    if (body.length) return body;
+  }
+
+  /*
+   * 일부 구형 게시글에서는 전달받은 root 자체가 .post-view일 수 있다.
+   *
+   * .post-view는 게시글 본문 컨테이너로 사용되므로 이 경우에만 root 자체를 허용한다.
+   */
+  if (root.is(".post-view")) return root;
+
+  const postView = root.find(".post-view").first();
+
+  if (postView.length) return postView;
+
+  throw new Error("콘텐츠 해시를 생성할 게시글 본문을 찾을 수 없습니다.");
+}
+
 function createContentHash(root) {
-  const clone = root.clone();
+  const postBody = getPostBody(root);
+  const clone = postBody.clone();
 
   /*
    * [해시 제외 - HTML id 속성]
@@ -129,49 +176,6 @@ function createContentHash(root) {
   clone.find("[splugin-id]").removeAttr("splugin-id");
 
   /*
-   * [해시 제외 - 공감 UI]
-   *
-   * .area_sympathy는 게시글 본문이 아니라 네이버가 동적으로 생성하는 공감/리액션 UI다.
-   * 페이지를 읽는 시점에 따라 초기 HTML과 렌더링 완료 HTML의 구조 및 속성이 달라지는 것이 확인되었다.
-   *
-   * 실제 변동 예:
-   *   style="visibility: visible;" 존재 여부
-   *   aria-expanded 존재 여부
-   *   role="none" / role="menuitem"
-   *   role="menuitem" / role="button"
-   *   tabindex 존재 여부
-   *   __reaction__zeroface 클래스 존재 여부
-   *   숨겨진 reaction icon 개수
-   *
-   * 중요:
-   * 공감 수 및 공감 UI의 변화는 게시글 본문 수정이 아니므로 이 영역 전체를 해시에서 제외한다.
-   * 이 처리를 삭제하면 네이버 UI의 로딩 상태만 달라져도 게시글이 변경된 것으로 판단될 수 있다.
-   */
-  clone.find(".area_sympathy").remove();
-
-  /*
-   * [해시 제외 - 네이버 공유 플러그인]
-   *
-   * .naver-splugin은 카페 보내기, Keep, 메모 보내기 등의 네이버 공유 UI다.
-   * 게시글 본문과 관계없이 JavaScript 실행 상태에 따라 내부 DOM 전체가 생성되거나 비어 있을 수 있다.
-   *
-   * 실제로 같은 게시글에서:
-   *
-   *   <div class="naver-splugin">...</div>
-   *
-   * 처럼 공유 UI 전체가 생성되는 경우와:
-   *
-   *   <div class="naver-splugin"></div>
-   *
-   * 처럼 비어 있는 경우가 모두 확인되었다.
-   *
-   * 중요:
-   * 게시글 콘텐츠가 아니므로 속성만 제거하지 말고 .naver-splugin 전체를 해시에서 제외한다.
-   * 이 처리를 삭제하면 공유 플러그인의 로딩 여부만으로 해시가 변경될 수 있다.
-   */
-  clone.find(".naver-splugin").remove();
-
-  /*
    * [해시 제외 - 첨부파일 다운로드 URL]
    *
    * 네이버 첨부파일의 .se-file-save-button href에는 같은 파일이어도 페이지를 다시 불러올 때
@@ -184,32 +188,6 @@ function createContentHash(root) {
    * 실제 첨부파일이 추가/삭제되거나 파일명이 변경되면 해시가 달라져야 한다.
    */
   clone.find(".se-component.se-file a.se-file-save-button").removeAttr("href");
-
-  /*
-   * [해시 제외 - 구형 에디터 공감/댓글 UI]
-   *
-   * 구형 네이버 블로그의 .post-btn 영역은 게시글 본문이 아니라
-   * 공감, 댓글 등 게시글 하단의 상호작용 UI다.
-   *
-   * 같은 게시글을 다시 불러와도 네이버 JavaScript의 로딩 상태에 따라
-   * 공감 UI의 DOM 구조, class, role, aria-* 속성 등이 달라지는 것이 확인되었다.
-   *
-   * 실제 변동 예:
-   *   style="visibility: visible;" 존재 여부
-   *   __reaction__zeroface 클래스 존재 여부
-   *   aria-expanded / aria-hidden 존재 여부
-   *   role="menuitem" / role="button" / role="none"
-   *   tabindex 존재 여부
-   *   공감 카운트 표시 DOM 차이
-   *
-   * 중요:
-   * 공감 및 댓글 변화는 게시글 본문 수정으로 취급하지 않는다.
-   * 따라서 .post-btn 전체를 해시에서 제외한다.
-   *
-   * 실제 게시글 본문인 .post-view는 그대로 유지되므로
-   * 글 내용이 수정되면 해시는 정상적으로 변경된다.
-   */
-  clone.find(".post-btn").remove();
 
   /*
    * [해시 제외 - OG 링크 썸네일]
@@ -354,20 +332,6 @@ function createContentHash(root) {
 
     if (normalizedHref !== href) $el.attr("href", normalizedHref);
   });
-
-  /*
-   * [해시 제외 - 태그 UI]
-   *
-   * 네이버 블로그의 .wrap_tag 영역은 페이지를 불러오는 시점의 JavaScript 로딩 상태에 따라
-   * 실제 태그 목록이 표시되거나 "작성된 태그가 없습니다." 상태로 표시될 수 있다.
-   *
-   * 같은 게시글에서도 태그 UI의 로딩 상태만으로 HTML이 달라지는 것이 확인되었다.
-   *
-   * 중요:
-   * 태그 UI의 일시적인 로딩 차이로 게시글이 수정된 것으로 판단되지 않도록
-   * .wrap_tag 전체를 해시에서 제외한다.
-   */
-  clone.find(".wrap_tag").remove();
 
   /*
    * [해시 제외 - HTML 주석]

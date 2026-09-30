@@ -1,10 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const cheerio = require("cheerio");
 const {fetchNaver} = require("./src/naver-request");
 const {makeHtml, detectEditorVersion} = require("./src/make-html");
 const {makeMarkdown} = require("./src/make-markdown");
+const {createContentHash} = require("./src/content-hash");
 const {
   loadBackupCache,
   saveBackupCache,
@@ -88,32 +88,6 @@ function getPostRoot($) {
   }
 
   throw new Error("게시글 본문을 찾을 수 없습니다.");
-}
-
-function createContentHash(root) {
-  const clone = root.clone();
-
-  clone.find("script, style").remove();
-
-  clone.find("*").each((_, element) => {
-    const $element = clone.find(element);
-
-    for (const attribute of Object.keys(element.attribs || {})) {
-      if (
-        attribute.startsWith("data-")
-        || attribute === "id"
-        || attribute === "class"
-        || attribute === "style"
-      ) {
-        continue;
-      }
-    }
-  });
-
-  const source = clone.html() || "";
-  const hash = crypto.createHash("sha256").update(source).digest("hex");
-
-  return {hash, source};
 }
 
 function extractPostCategoryNo($) {
@@ -375,6 +349,11 @@ async function convertPost(blogId, logNo, options = {}) {
       editorVersion,
       previousHtml,
     });
+
+    const hashSourceFilename = `.hash-source-${contentHash.slice(0, 16)}.html`;
+    const hashSourcePath = path.join(tempOutputDir, hashSourceFilename);
+
+    if (!fs.existsSync(hashSourcePath)) fs.writeFileSync(hashSourcePath, hashSource, "utf8");
 
     fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
 
