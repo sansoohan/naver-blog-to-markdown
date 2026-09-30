@@ -103,7 +103,6 @@ const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBo
 
   const selectResult = (post: PostInfo) => {
     setQuery("");
-    setFocused(false);
     onSelectPost(post.id);
   };
 
