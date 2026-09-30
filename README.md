@@ -122,9 +122,12 @@ Markdown으로 안전하게 표현할 수 없는 표·색상·복잡한 코드�
 
 변환 범위는 `font-size-rules.json`에서 관리.
 
-## QA 테스터
+## [백업 결과 확인 도구](./test/README.md)
 
 백업 결과의 `original.html`과 `index.md` 렌더링 결과를 나란히 비교하는 도구입니다.
+
+![검색 및 페이지 보기](https://github.com/sansoohan/naver-blog-to-markdown/releases/download/readme-gifs-1.4.1/2_._._._3fps.gif)
+
 
 처음 한 번만 QA 도구의 의존성을 설치합니다.
 
@@ -133,7 +136,7 @@ npm install --prefix test
 npm install --prefix test/server
 ```
 
-QA 테스터를 실행합니다.
+백업 결과 확인 도구를 실행합니다.
 
 ```bash
 npm run test
