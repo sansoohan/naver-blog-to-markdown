@@ -1,4 +1,4 @@
-import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useAppSettings } from "~/contexts/AppSettingsContext";
 
 type SettingsPanelProps = {
   show: boolean;
@@ -20,10 +20,13 @@ function SettingsPanel({show, onClose}: SettingsPanelProps) {
   return (
     <>
       <aside
-        className={`settings-panel position-fixed top-0 end-0 h-100 bg-body border-start shadow ${show ? "open" : ""}`}
+        className={
+          `settings-panel position-fixed top-0 end-0 h-100 d-flex flex-column ` +
+          `bg-body border-start shadow ${show ? "open" : ""}`
+        }
         aria-hidden={!show}
       >
-        <div className="settings-panel-header d-flex align-items-center justify-content-between px-3 border-bottom">
+        <div className="settings-panel-header d-flex align-items-center justify-content-between flex-shrink-0 px-3 border-bottom">
           <span className="fw-semibold">설정</span>
 
           <button
@@ -37,7 +40,7 @@ function SettingsPanel({show, onClose}: SettingsPanelProps) {
           </button>
         </div>
 
-        <div className="overflow-auto h-100">
+        <div className="overflow-auto flex-grow-1" style={{minHeight: 0}}>
           <div className="list-group list-group-flush">
             <label
               className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-3 py-3"
@@ -160,6 +163,15 @@ function SettingsPanel({show, onClose}: SettingsPanelProps) {
                   <kbd>Ctrl</kbd>
                   <span>+</span>
                   <kbd>,</kbd>
+                </span>
+              </div>
+
+              <div className="d-flex align-items-center justify-content-between gap-3">
+                <span className="text-secondary">스크롤 동기화</span>
+                <span className="d-flex align-items-center gap-1">
+                  <kbd>Alt</kbd>
+                  <span>+</span>
+                  <kbd>S</kbd>
                 </span>
               </div>
 

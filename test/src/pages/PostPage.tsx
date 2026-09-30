@@ -1,14 +1,14 @@
 import { useEffect } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import ViewerPage from "../components/ViewerPage";
-import { ROUTE_HOME } from "../constants/routes";
-import { usePosts } from "../hooks/usePosts";
+import Workspace from "~/components/Workspace";
+import { ROUTE_HOME } from "~/constants/routes";
+import { usePosts } from "~/hooks/usePosts";
 
 const LAST_VIEWED_POST_KEY = "lastViewedPostId";
 
 function PostPage() {
-  const { postId } = useParams();
-  const { posts, loading, error } = usePosts();
+  const {postId} = useParams();
+  const {posts, loading, error} = usePosts();
   const currentPost = posts.find(post => post.id === postId);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ function PostPage() {
     return <Navigate to={ROUTE_HOME} replace />;
   }
 
-  return <ViewerPage posts={posts} postId={postId} />;
+  return <Workspace posts={posts} postId={postId} />;
 }
 
 export default PostPage;

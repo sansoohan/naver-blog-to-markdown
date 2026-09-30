@@ -121,6 +121,16 @@
   height: 52px;
 }
 
+.settings-panel-body {
+  min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.settings-panel-body::-webkit-scrollbar {
+  display: none;
+}
+
 .settings-panel-backdrop {
   z-index: 1040;
   background-color: rgba(var(--bs-black-rgb), 0.12);

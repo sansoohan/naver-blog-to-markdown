@@ -1,14 +1,14 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import ViewerPage from "../components/ViewerPage";
-import { usePosts } from "../hooks/usePosts";
-import { getPostRoute } from "../utils/route";
+import Workspace from "~/components/Workspace";
+import { usePosts } from "~/hooks/usePosts";
+import { getPostRoute } from "~/utils/route";
 
 const LAST_VIEWED_POST_KEY = "lastViewedPostId";
 
 function HomePage() {
   const navigate = useNavigate();
-  const { posts, loading, error } = usePosts();
+  const {posts, loading, error} = usePosts();
 
   useEffect(() => {
     if (loading || error) return;
@@ -24,7 +24,7 @@ function HomePage() {
       return;
     }
 
-    navigate(getPostRoute(lastViewedPostId), { replace: true });
+    navigate(getPostRoute(lastViewedPostId), {replace: true});
   }, [posts, loading, error, navigate]);
 
   if (loading) {
@@ -45,7 +45,7 @@ function HomePage() {
     );
   }
 
-  return <ViewerPage posts={posts} />;
+  return <Workspace posts={posts} />;
 }
 
 export default HomePage;

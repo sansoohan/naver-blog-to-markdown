@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { PostInfo } from "../types/post";
+import type { PostInfo } from "~/types/post";
 
 type SearchBoxProps = {
   posts: PostInfo[];
