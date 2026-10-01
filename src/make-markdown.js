@@ -499,6 +499,33 @@ function isForeignFormattedBlock($, element) {
   return hasComplexBoxStyle && styledChildren >= 2;
 }
 
+function protectLegacyPastedHtml($, root, store, editorVersion) {
+  if (editorVersion !== 1 && editorVersion !== 2) return;
+
+  const content = root.find("#postViewArea .post-view,.se3_view,.post-view > .view,.post-view,.view").first();
+  if (!content.length) return;
+
+  /*
+   * SmartEditor 1/2의 기본 본문은 일반 <p> 중심 구조다.
+   * 이미지, 표, 영상, 첨부파일 등 네이버 고유 요소는 앞 단계에서 이미 보호된다.
+   *
+   * 그 뒤에도 본문 바로 아래에 남아 있는 별도 HTML 블록은
+   * 구버전에서 직접 붙여 넣은 HTML로 보고 원본 그대로 보존한다.
+   */
+  const blocks = content.children("div,section,article,aside").toArray();
+
+  for (const element of blocks) {
+    const node = $(element);
+
+    if (!node.parent().length) continue;
+    if (node.hasClass("naver-protected")) continue;
+    if (node.hasClass("autosourcing-stub-saved")) continue;
+
+    const html = $.html(element);
+    node.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
+  }
+}
+
 function protectForeignFormattedBlocks($, root, store) {
   const selector = [
     "pre",
@@ -566,6 +593,12 @@ function makeMarkdown(originalHtml, options = {}) {
    * 네이버 고유 코드블록은 Markdown fenced code로 변환한다.
    */
   protectCodeBlocks($, root, store);
+
+  /*
+   * SmartEditor 1/2에서 기본 본문 구조가 아닌 직접 삽입 HTML은
+   * Markdown으로 풀지 않고 원본 HTML 그대로 보존한다.
+   */
+  protectLegacyPastedHtml($, root, store, editorVersion);
 
   /*
    * 외부 에디터나 웹에서 붙여 넣은 복잡한 서식은 HTML로 보존한다.
