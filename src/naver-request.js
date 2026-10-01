@@ -100,12 +100,12 @@ async function fetchPrivatePage(url, options = {}) {
 
     if (!response) throw new Error(`페이지 요청 실패: ${url}`);
 
-    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    const html = await response.text();
 
     return {
       page,
       response,
-      html: await page.content(),
+      html,
     };
   }
 
@@ -121,7 +121,9 @@ async function fetchPrivatePage(url, options = {}) {
 
     result = await load();
 
-    if (isPrivatePageDenied(result.page, result.html)) throw new Error("로그인 후에도 비공개 게시글에 접근할 수 없습니다.");
+    if (isPrivatePageDenied(result.page, result.html)) {
+      throw new Error("로그인 후에도 비공개 게시글에 접근할 수 없습니다.");
+    }
   }
 
   const status = result.response.status();
@@ -129,7 +131,7 @@ async function fetchPrivatePage(url, options = {}) {
   return makeResponse({
     ok: status >= 200 && status < 400,
     status,
-    url: result.page.url(),
+    url: result.response.url(),
     text: result.html,
   });
 }

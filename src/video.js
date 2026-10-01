@@ -176,7 +176,7 @@ function replaceNaverVideoComponent($, component, result, posterFilename = "", e
   /*
    * SmartEditor 1.x / 2.x 구형 네이버 동영상
    */
-  if (component.is("pzp-pc-layout._naverVideo")) {
+  if (component.is("._naverVideo")) {
     component.replaceWith(html);
     return true;
   }
@@ -272,7 +272,7 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
     ".se_video",
     ".se-video",
     "[data-module*='video']",
-    "pzp-pc-layout._naverVideo",
+    "._naverVideo",
   ];
 
   const elements = root.find(selectors.join(", ")).add(root.filter(selectors.join(", "))).toArray();
@@ -281,7 +281,7 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
 
   for (const element of elements) {
     const current = $(element);
-    const owner = current.closest(".se-component.se-video, .se_video, .se-video, pzp-pc-layout._naverVideo");
+    const owner = current.closest(".se-component.se-video, .se_video, .se-video, ._naverVideo");
     const component = owner.length ? owner : current;
     const componentElement = component[0];
 
