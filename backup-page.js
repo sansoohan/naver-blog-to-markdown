@@ -246,7 +246,11 @@ function getPreviousCache(cache, blogId, logNo) {
 }
 
 async function resolvePostCategoryPath($, blogId, logNo, options = {}) {
-  const {includePrivate = false} = options;
+  const {
+    includePrivate = false,
+    categoryUpdated = false,
+    outputDir = "",
+  } = options;
   const categoryNo = extractPostCategoryNo($);
 
   /*
@@ -254,8 +258,10 @@ async function resolvePostCategoryPath($, blogId, logNo, options = {}) {
    * convertPost()가 실행되는 시점에는 backup-page.js의 export가 끝난 상태라
    * 순환 참조가 발생하지 않는다.
    */
-  const {getCategoryList, getCategoryPathParts} = require("./backup-category");
+  const {getCategoryList, getCategoryPathParts, updateCategories} = require("./backup-category");
   const categories = await getCategoryList(blogId, {includePrivate});
+
+  if (!categoryUpdated) updateCategories(categories, outputDir);
 
   const currentCategory = categories.find(category => String(category.categoryNo) === String(categoryNo));
 
@@ -276,6 +282,7 @@ async function convertPost(blogId, logNo, options = {}) {
     categoryPath = null,
     title: suppliedTitle = "",
     includePrivate = false,
+    categoryUpdated = false,
     update = false,
     useCache = false,
     outputDir = "",
@@ -313,7 +320,11 @@ async function convertPost(blogId, logNo, options = {}) {
   if (Array.isArray(categoryPath) && categoryPath.length) {
     normalizedCategoryParts = categoryPath.map(normalizeText).filter(Boolean);
   } else {
-    normalizedCategoryParts = await resolvePostCategoryPath($, blogId, logNo, {includePrivate});
+    normalizedCategoryParts = await resolvePostCategoryPath($, blogId, logNo, {
+      includePrivate,
+      categoryUpdated,
+      outputDir,
+    });
   }
 
   if (!normalizedCategoryParts.length) throw new Error(`게시글 ${logNo}의 카테고리 경로를 찾을 수 없습니다.`);

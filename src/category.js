@@ -6,6 +6,11 @@ const POST_LIST_MIN_INTERVAL=50;
 const POST_LIST_MAX_INTERVAL=2000;
 const postListStates=new Map();
 
+const CategoryVisibility = {
+  PUBLIC: "public",
+  PRIVATE: "private",
+};
+
 function parseBlogUrl(url) {
   const parsed=new URL(url);
   const parts=parsed.pathname.split("/").filter(Boolean);
@@ -168,12 +173,18 @@ function parseCategoriesFromHtml(html) {
 
     if(!name) return;
 
-    const className=item.attr("class")||"";
-    const parentMatch=className.match(/parentcategoryno_(-?\d+)/i);
-    const parentCategoryNo=parentMatch&&!["0","-1"].includes(parentMatch[1])?parentMatch[1]:null;
+    const className = item.attr("class") || "";
+    const parentMatch = className.match(/parentcategoryno_(-?\d+)/i);
+    const parentCategoryNo = parentMatch && !["0", "-1"].includes(parentMatch[1])
+      ? parentMatch[1]
+      : null;
+
+    const visibility = item.find("img.lock").length
+      ? CategoryVisibility.PRIVATE
+      : CategoryVisibility.PUBLIC;
 
     seen.add(categoryNo);
-    categories.push({categoryNo,name,parentCategoryNo});
+    categories.push({categoryNo, name, parentCategoryNo, visibility});
   });
 
   return categories;
