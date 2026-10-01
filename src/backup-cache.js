@@ -103,32 +103,6 @@ function collectCachePaths(cache) {
   return {paths, invalidKeys, duplicateKeys};
 }
 
-function removeEmptyParentDirectories(startDir) {
-  let currentDir = path.dirname(startDir);
-
-  while (normalizePath(currentDir) !== normalizePath(OUTPUT_ROOT)) {
-    if (!isInsideOutput(currentDir)) break;
-
-    let entries;
-
-    try {
-      entries = fs.readdirSync(currentDir);
-    } catch {
-      break;
-    }
-
-    if (entries.length) break;
-
-    try {
-      fs.rmdirSync(currentDir);
-    } catch {
-      break;
-    }
-
-    currentDir = path.dirname(currentDir);
-  }
-}
-
 function checkBackupCache() {
   const cache = loadBackupCache();
   const cacheData = collectCachePaths(cache);
@@ -185,23 +159,9 @@ function checkBackupCache() {
     const fileInfo = filePaths.get(normalizedPath);
     if (!fileInfo) continue;
 
-    const backupDir = fileInfo.path;
+    const relative = path.relative(process.cwd(), fileInfo.path);
 
-    if (!isInsideOutput(backupDir)) {
-      console.warn(`백업 삭제 건너뜀: ${backupDir}`);
-      continue;
-    }
-
-    const relative = path.relative(process.cwd(), backupDir);
-
-    console.log(`백업 삭제: ${relative}`);
-
-    try {
-      fs.rmSync(backupDir, {recursive: true, force: true});
-      removeEmptyParentDirectories(backupDir);
-    } catch (error) {
-      console.warn(`백업 삭제 실패: ${relative} - ${error.message}`);
-    }
+    console.log(`캐시 없는 백업 보존: ${relative}`);
   }
 
   saveBackupCache(cache);
