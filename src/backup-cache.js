@@ -3,6 +3,7 @@ const path = require("path");
 
 const OUTPUT_ROOT = path.resolve(process.cwd(), "output");
 const CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
+const LOCK_FILE = path.join(OUTPUT_ROOT, ".backup-cache.lock");
 
 /*
  * 현재 처리 중인 게시글.
@@ -13,7 +14,72 @@ const CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
  */
 let activeContext = null;
 
-function loadBackupCache() {
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isProcessRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function removeStaleBackupLock() {
+  if (!fs.existsSync(LOCK_FILE)) return;
+
+  try {
+    const stat = fs.statSync(LOCK_FILE);
+
+    if (Date.now() - stat.mtimeMs < 5000) return;
+
+    const pid = Number(fs.readFileSync(LOCK_FILE, "utf8").trim());
+
+    if (isProcessRunning(pid)) return;
+
+    fs.rmSync(LOCK_FILE, {force: true});
+  } catch {}
+}
+
+function acquireBackupLock(timeoutMs = 60000) {
+  fs.mkdirSync(OUTPUT_ROOT, {recursive: true});
+
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      const fd = fs.openSync(LOCK_FILE, "wx");
+
+      fs.writeFileSync(fd, String(process.pid), "utf8");
+
+      return fd;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+
+      removeStaleBackupLock();
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error("백업 캐시 락을 60초 안에 획득하지 못했습니다.");
+      }
+
+      sleepSync(50);
+    }
+  }
+}
+
+function releaseBackupLock(fd) {
+  try {
+    if (fd !== undefined && fd !== null) fs.closeSync(fd);
+  } finally {
+    fs.rmSync(LOCK_FILE, {force: true});
+  }
+}
+
+function loadBackupCacheUnlocked() {
   if (!fs.existsSync(CACHE_FILE)) return {};
 
   try {
@@ -23,8 +89,18 @@ function loadBackupCache() {
   }
 }
 
-function saveBackupCache(cache) {
-  const tempFile = `${CACHE_FILE}.tmp`;
+function loadBackupCache() {
+  const lock = acquireBackupLock();
+
+  try {
+    return loadBackupCacheUnlocked();
+  } finally {
+    releaseBackupLock(lock);
+  }
+}
+
+function saveBackupCacheUnlocked(cache) {
+  const tempFile = `${CACHE_FILE}.${process.pid}.tmp`;
 
   fs.mkdirSync(OUTPUT_ROOT, {recursive: true});
   fs.writeFileSync(tempFile, JSON.stringify(cache, null, 2), "utf8");
@@ -32,13 +108,40 @@ function saveBackupCache(cache) {
   fs.renameSync(tempFile, CACHE_FILE);
 }
 
+function saveBackupCache(cache) {
+  const lock = acquireBackupLock();
+
+  try {
+    saveBackupCacheUnlocked(cache);
+  } finally {
+    releaseBackupLock(lock);
+  }
+}
+
+function updateBackupCache(update) {
+  const lock = acquireBackupLock();
+
+  try {
+    const cache = loadBackupCacheUnlocked();
+    const result = update(cache);
+
+    saveBackupCacheUnlocked(cache);
+
+    return result;
+  } finally {
+    releaseBackupLock(lock);
+  }
+}
+
 function normalizePath(value) {
   const normalized = path.resolve(value);
+
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function isInsideOutput(targetPath) {
   const relative = path.relative(OUTPUT_ROOT, targetPath);
+
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
@@ -46,6 +149,7 @@ function getCacheBackupDir(entry) {
   if (!entry || typeof entry !== "object" || !entry.path) return "";
 
   const backupDir = path.resolve(process.cwd(), entry.path);
+
   return isInsideOutput(backupDir) ? backupDir : "";
 }
 
@@ -64,12 +168,17 @@ function collectBackupDirectories(dir = OUTPUT_ROOT, result = new Map()) {
   const hasMarkdown = entries.some(entry => entry.isFile() && entry.name === "index.md");
 
   if (hasOriginal || hasMarkdown) {
-    result.set(normalizePath(dir), {path: dir, complete: hasOriginal && hasMarkdown});
+    result.set(normalizePath(dir), {
+      path: dir,
+      complete: hasOriginal && hasMarkdown,
+    });
+
     return result;
   }
 
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === ".tmp") continue;
+
     collectBackupDirectories(path.join(dir, entry.name), result);
   }
 
@@ -97,78 +206,143 @@ function collectCachePaths(cache) {
       continue;
     }
 
-    paths.set(normalized, {cacheKey, entry, path: backupDir});
+    paths.set(normalized, {
+      cacheKey,
+      entry,
+      path: backupDir,
+    });
   }
 
-  return {paths, invalidKeys, duplicateKeys};
+  return {
+    paths,
+    invalidKeys,
+    duplicateKeys,
+  };
+}
+
+function getActivePostKeys() {
+  const tempRoot = path.join(OUTPUT_ROOT, ".tmp");
+  const keys = new Set();
+
+  if (!fs.existsSync(tempRoot)) return keys;
+
+  let entries;
+
+  try {
+    entries = fs.readdirSync(tempRoot, {withFileTypes: true});
+  } catch {
+    return keys;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const match = entry.name.match(/^(.+)_(\d+)_(?:\d+_)?\d+$/);
+
+    if (!match) continue;
+
+    keys.add(`${match[1]}/${match[2]}`);
+    keys.add(match[2]);
+  }
+
+  return keys;
 }
 
 function checkBackupCache() {
-  const cache = loadBackupCache();
-  const cacheData = collectCachePaths(cache);
-  const filePaths = collectBackupDirectories();
-  const duplicatePaths = new Set();
+  const lock = acquireBackupLock();
 
-  for (const cacheKey of cacheData.duplicateKeys) {
-    const backupDir = getCacheBackupDir(cache[cacheKey]);
-    if (backupDir) duplicatePaths.add(normalizePath(backupDir));
-  }
+  try {
+    const cache = loadBackupCacheUnlocked();
+    const cacheData = collectCachePaths(cache);
+    const filePaths = collectBackupDirectories();
+    const activePostKeys = getActivePostKeys();
+    const duplicatePaths = new Set();
 
-  const commonPaths = new Set();
+    for (const cacheKey of cacheData.duplicateKeys) {
+      const backupDir = getCacheBackupDir(cache[cacheKey]);
 
-  for (const [normalizedPath] of cacheData.paths) {
-    if (duplicatePaths.has(normalizedPath)) continue;
-    if (!filePaths.has(normalizedPath)) continue;
-    if (!filePaths.get(normalizedPath).complete) continue;
+      if (backupDir) duplicatePaths.add(normalizePath(backupDir));
+    }
 
-    commonPaths.add(normalizedPath);
-  }
+    const commonPaths = new Set();
 
-  const cacheOnlyKeys = new Set([...cacheData.invalidKeys, ...cacheData.duplicateKeys]);
+    for (const [normalizedPath] of cacheData.paths) {
+      if (duplicatePaths.has(normalizedPath)) continue;
+      if (!filePaths.has(normalizedPath)) continue;
+      if (!filePaths.get(normalizedPath).complete) continue;
 
-  for (const [normalizedPath, cacheInfo] of cacheData.paths) {
-    if (!commonPaths.has(normalizedPath)) cacheOnlyKeys.add(cacheInfo.cacheKey);
-  }
+      commonPaths.add(normalizedPath);
+    }
 
-  const fileOnlyPaths = new Set();
+    const cacheOnlyKeys = new Set([
+      ...cacheData.invalidKeys,
+      ...cacheData.duplicateKeys,
+    ]);
 
-  for (const [normalizedPath] of filePaths) {
-    if (!commonPaths.has(normalizedPath)) fileOnlyPaths.add(normalizedPath);
-  }
+    for (const [normalizedPath, cacheInfo] of cacheData.paths) {
+      if (!commonPaths.has(normalizedPath)) {
+        cacheOnlyKeys.add(cacheInfo.cacheKey);
+      }
+    }
 
-  console.log("");
-  console.log("백업 캐시를 확인합니다.");
-  console.log(
-    `캐시: ${Object.keys(cache).length}개 / 백업: ${filePaths.size}개 / 공통: ${commonPaths.size}개 / `
-    + `캐시만: ${cacheOnlyKeys.size}개 / 파일만: ${fileOnlyPaths.size}개`
-  );
+    /*
+     * 다른 프로세스가 현재 .tmp에서 생성 중인 게시글은
+     * 아직 최종 폴더가 없어도 캐시 정리 대상에서 제외한다.
+     */
+    for (const cacheKey of activePostKeys) {
+      cacheOnlyKeys.delete(cacheKey);
+    }
 
-  if (!cacheOnlyKeys.size && !fileOnlyPaths.size) {
-    console.log("캐시와 백업이 모두 1:1로 일치합니다.\n");
+    const fileOnlyPaths = new Set();
+
+    for (const [normalizedPath] of filePaths) {
+      if (!commonPaths.has(normalizedPath)) {
+        fileOnlyPaths.add(normalizedPath);
+      }
+    }
+
+    console.log("");
+    console.log("백업 캐시를 확인합니다.");
+    console.log(
+      `캐시: ${Object.keys(cache).length}개 / 백업: ${filePaths.size}개 / 공통: ${commonPaths.size}개 / `
+      + `캐시만: ${cacheOnlyKeys.size}개 / 파일만: ${fileOnlyPaths.size}개`
+    );
+
+    if (!cacheOnlyKeys.size && !fileOnlyPaths.size) {
+      console.log("캐시와 백업이 모두 1:1로 일치합니다.\n");
+
+      return cache;
+    }
+
+    for (const cacheKey of cacheOnlyKeys) {
+      if (!Object.prototype.hasOwnProperty.call(cache, cacheKey)) continue;
+
+      console.log(`캐시 삭제: ${cacheKey}`);
+
+      delete cache[cacheKey];
+    }
+
+    /*
+     * 캐시에 없는 실제 백업은 절대로 삭제하지 않는다.
+     */
+    for (const normalizedPath of fileOnlyPaths) {
+      const fileInfo = filePaths.get(normalizedPath);
+
+      if (!fileInfo) continue;
+
+      const relative = path.relative(process.cwd(), fileInfo.path);
+
+      console.log(`캐시 없는 백업 보존: ${relative}`);
+    }
+
+    saveBackupCacheUnlocked(cache);
+
+    console.log("캐시 정리 완료\n");
+
     return cache;
+  } finally {
+    releaseBackupLock(lock);
   }
-
-  for (const cacheKey of cacheOnlyKeys) {
-    if (!Object.prototype.hasOwnProperty.call(cache, cacheKey)) continue;
-
-    console.log(`캐시 삭제: ${cacheKey}`);
-    delete cache[cacheKey];
-  }
-
-  for (const normalizedPath of fileOnlyPaths) {
-    const fileInfo = filePaths.get(normalizedPath);
-    if (!fileInfo) continue;
-
-    const relative = path.relative(process.cwd(), fileInfo.path);
-
-    console.log(`캐시 없는 백업 보존: ${relative}`);
-  }
-
-  saveBackupCache(cache);
-
-  console.log("캐시 정리 완료\n");
-
-  return cache;
 }
 
 /*
@@ -257,7 +431,10 @@ function getResourceContext() {
 }
 
 function requireResourceContext() {
-  if (!activeContext) throw new Error("리소스 캐시 게시글 context가 설정되지 않았습니다.");
+  if (!activeContext) {
+    throw new Error("리소스 캐시 게시글 context가 설정되지 않았습니다.");
+  }
+
   return activeContext;
 }
 
@@ -271,6 +448,7 @@ function normalizeResourceFilename(value) {
 
 function normalizeResourceSize(value) {
   const size = Number(value);
+
   return Number.isFinite(size) && size > 0 ? Math.trunc(size) : 0;
 }
 
@@ -292,11 +470,17 @@ function makeResourceKey(filename, size) {
 }
 
 function ensurePostCache(cache, cacheKey) {
-  if (!cache[cacheKey] || typeof cache[cacheKey] !== "object") cache[cacheKey] = {};
+  if (!cache[cacheKey] || typeof cache[cacheKey] !== "object") {
+    cache[cacheKey] = {};
+  }
 
   const entry = cache[cacheKey];
 
-  if (!entry.resources || typeof entry.resources !== "object" || Array.isArray(entry.resources)) {
+  if (
+    !entry.resources
+    || typeof entry.resources !== "object"
+    || Array.isArray(entry.resources)
+  ) {
     entry.resources = {};
   }
 
@@ -322,18 +506,30 @@ function isExistingFile(filePath) {
 }
 
 function isInsideDirectory(filePath, directory) {
-  const relative = path.relative(path.resolve(directory), path.resolve(filePath));
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  const relative = path.relative(
+    path.resolve(directory),
+    path.resolve(filePath)
+  );
+
+  return (
+    relative !== ""
+    && !relative.startsWith("..")
+    && !path.isAbsolute(relative)
+  );
 }
 
 function toPostRelativePath(filePath) {
   const context = requireResourceContext();
   const absolute = path.resolve(filePath);
 
-  if (normalizePath(absolute) === normalizePath(context.outputDir)) return "";
+  if (normalizePath(absolute) === normalizePath(context.outputDir)) {
+    return "";
+  }
 
   if (!isInsideDirectory(absolute, context.outputDir)) {
-    throw new Error(`게시글 폴더 밖의 리소스는 캐시할 수 없습니다: ${absolute}`);
+    throw new Error(
+      `게시글 폴더 밖의 리소스는 캐시할 수 없습니다: ${absolute}`
+    );
   }
 
   return path.relative(context.outputDir, absolute);
@@ -341,7 +537,11 @@ function toPostRelativePath(filePath) {
 
 function fromPostRelativePath(storedPath) {
   const context = requireResourceContext();
-  return path.resolve(context.outputDir, String(storedPath || ""));
+
+  return path.resolve(
+    context.outputDir,
+    String(storedPath || "")
+  );
 }
 
 function getResourceState(metadata) {
@@ -398,6 +598,7 @@ function getResourceState(metadata) {
 
 function getResource(metadata) {
   const state = getResourceState(metadata);
+
   return state?.status === "ok" ? state : null;
 }
 
@@ -412,35 +613,10 @@ function setResource(metadata, filePath) {
 
   if (!key || !filePath) return;
 
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
-
-  entry.resources[key] = {
-    filename,
-    size,
-    etag: etag || null,
-    path: toPostRelativePath(filePath),
-  };
-
-  saveBackupCache(cache);
-}
-
-function setResources(metadataList, filePath) {
-  if (!activeContext) return;
-  if (!Array.isArray(metadataList) || !metadataList.length || !filePath) return;
-
-  const context = requireResourceContext();
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
   const storedPath = toPostRelativePath(filePath);
 
-  for (const metadata of metadataList) {
-    const filename = normalizeResourceFilename(metadata?.filename);
-    const size = normalizeResourceSize(metadata?.size);
-    const etag = normalizeEtag(metadata?.etag);
-    const key = makeResourceKey(filename, size);
-
-    if (!key) continue;
+  updateBackupCache(cache => {
+    const entry = ensurePostCache(cache, context.cacheKey);
 
     entry.resources[key] = {
       filename,
@@ -448,9 +624,35 @@ function setResources(metadataList, filePath) {
       etag: etag || null,
       path: storedPath,
     };
-  }
+  });
+}
 
-  saveBackupCache(cache);
+function setResources(metadataList, filePath) {
+  if (!activeContext) return;
+  if (!Array.isArray(metadataList) || !metadataList.length || !filePath) return;
+
+  const context = requireResourceContext();
+  const storedPath = toPostRelativePath(filePath);
+
+  updateBackupCache(cache => {
+    const entry = ensurePostCache(cache, context.cacheKey);
+
+    for (const metadata of metadataList) {
+      const filename = normalizeResourceFilename(metadata?.filename);
+      const size = normalizeResourceSize(metadata?.size);
+      const etag = normalizeEtag(metadata?.etag);
+      const key = makeResourceKey(filename, size);
+
+      if (!key) continue;
+
+      entry.resources[key] = {
+        filename,
+        size,
+        etag: etag || null,
+        path: storedPath,
+      };
+    }
+  });
 }
 
 function getResourceError(url) {
@@ -491,15 +693,14 @@ function setResourceError(url, error) {
 
   if (!source) return;
 
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
+  updateBackupCache(cache => {
+    const entry = ensurePostCache(cache, context.cacheKey);
 
-  entry.resourceErrors[source] = {
-    error: String(error?.message || error || "다운로드 실패"),
-    failedAt: new Date().toISOString(),
-  };
-
-  saveBackupCache(cache);
+    entry.resourceErrors[source] = {
+      error: String(error?.message || error || "다운로드 실패"),
+      failedAt: new Date().toISOString(),
+    };
+  });
 }
 
 function setResourcesError(urls, error) {
@@ -507,23 +708,23 @@ function setResourcesError(urls, error) {
   if (!Array.isArray(urls) || !urls.length) return;
 
   const context = requireResourceContext();
-  const cache = loadBackupCache();
-  const entry = ensurePostCache(cache, context.cacheKey);
   const failedAt = new Date().toISOString();
   const message = String(error?.message || error || "다운로드 실패");
 
-  for (const url of urls) {
-    const source = normalizeResourceUrl(url);
+  updateBackupCache(cache => {
+    const entry = ensurePostCache(cache, context.cacheKey);
 
-    if (!source) continue;
+    for (const url of urls) {
+      const source = normalizeResourceUrl(url);
 
-    entry.resourceErrors[source] = {
-      error: message,
-      failedAt,
-    };
-  }
+      if (!source) continue;
 
-  saveBackupCache(cache);
+      entry.resourceErrors[source] = {
+        error: message,
+        failedAt,
+      };
+    }
+  });
 }
 
 function clearResourceError(url) {
@@ -534,16 +735,15 @@ function clearResourceError(url) {
 
   if (!source) return;
 
-  const cache = loadBackupCache();
-  const entry = cache[context.cacheKey];
+  updateBackupCache(cache => {
+    const entry = cache[context.cacheKey];
 
-  if (!entry || typeof entry !== "object") return;
-  if (!entry.resourceErrors || typeof entry.resourceErrors !== "object") return;
-  if (!Object.prototype.hasOwnProperty.call(entry.resourceErrors, source)) return;
+    if (!entry || typeof entry !== "object") return;
+    if (!entry.resourceErrors || typeof entry.resourceErrors !== "object") return;
+    if (!Object.prototype.hasOwnProperty.call(entry.resourceErrors, source)) return;
 
-  delete entry.resourceErrors[source];
-
-  saveBackupCache(cache);
+    delete entry.resourceErrors[source];
+  });
 }
 
 function copyCachedFile(sourcePath, destinationDir, preferredName = "") {
@@ -554,14 +754,20 @@ function copyCachedFile(sourcePath, destinationDir, preferredName = "") {
   const filename = preferredName || path.basename(sourcePath);
   let destinationPath = path.join(destinationDir, filename);
 
-  if (normalizePath(sourcePath) === normalizePath(destinationPath)) return filename;
+  if (normalizePath(sourcePath) === normalizePath(destinationPath)) {
+    return filename;
+  }
 
   if (fs.existsSync(destinationPath)) {
     try {
       const sourceStat = fs.statSync(sourcePath);
       const destinationStat = fs.statSync(destinationPath);
 
-      if (sourceStat.isFile() && destinationStat.isFile() && sourceStat.size === destinationStat.size) {
+      if (
+        sourceStat.isFile()
+        && destinationStat.isFile()
+        && sourceStat.size === destinationStat.size
+      ) {
         return filename;
       }
     } catch {}
@@ -571,7 +777,11 @@ function copyCachedFile(sourcePath, destinationDir, preferredName = "") {
     let index = 2;
 
     do {
-      destinationPath = path.join(destinationDir, `${base}_${index}${ext}`);
+      destinationPath = path.join(
+        destinationDir,
+        `${base}_${index}${ext}`
+      );
+
       index++;
     } while (fs.existsSync(destinationPath));
   }
@@ -592,8 +802,12 @@ function relocateResourcePaths() {}
 module.exports = {
   CACHE_FILE,
   loadBackupCache,
+  loadBackupCacheUnlocked,
   saveBackupCache,
+  saveBackupCacheUnlocked,
   checkBackupCache,
+  acquireBackupLock,
+  releaseBackupLock,
 
   setResourceContext,
   clearResourceContext,

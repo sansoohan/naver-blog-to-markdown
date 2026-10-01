@@ -7,7 +7,10 @@ const {makeMarkdown} = require("./src/make-markdown");
 const {createContentHash} = require("./src/content-hash");
 const {
   loadBackupCache,
-  saveBackupCache,
+  loadBackupCacheUnlocked,
+  saveBackupCacheUnlocked,
+  acquireBackupLock,
+  releaseBackupLock,
   setResourceContext,
   clearResourceContext,
 } = require("./src/backup-cache");
@@ -267,7 +270,7 @@ async function convertPost(blogId, logNo, options = {}) {
   console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
 
   let cache = loadBackupCache();
-  const {cacheKey, previous, legacyKey} = getPreviousCache(cache, blogId, logNo);
+  let {cacheKey, previous, legacyKey} = getPreviousCache(cache, blogId, logNo);
 
   const detectedTitle = normalizeText($("meta[property='og:title']").attr("content"))
     || normalizeText($(".se-title-text").first().text())
@@ -323,7 +326,15 @@ async function convertPost(blogId, logNo, options = {}) {
     }
   }
 
-  const tempOutputDir = path.join(outputRoot, ".tmp", `${blogId}_${logNo}_${Date.now()}`);
+  /*
+   * PID까지 포함해 서로 다른 프로세스가 같은 글을 동시에 처리해도
+   * 임시 폴더 이름이 충돌하지 않게 한다.
+   */
+  const tempOutputDir = path.join(
+    outputRoot,
+    ".tmp",
+    `${blogId}_${logNo}_${process.pid}_${Date.now()}`
+  );
 
   removeDirectory(tempOutputDir);
   fs.mkdirSync(tempOutputDir, {recursive: true});
@@ -334,7 +345,9 @@ async function convertPost(blogId, logNo, options = {}) {
     if (resourceSourceDir) {
       const previousHtmlPath = path.join(resourceSourceDir, "original.html");
 
-      if (fs.existsSync(previousHtmlPath)) previousHtml = fs.readFileSync(previousHtmlPath, "utf8");
+      if (fs.existsSync(previousHtmlPath)) {
+        previousHtml = fs.readFileSync(previousHtmlPath, "utf8");
+      }
 
       copyDirectory(resourceSourceDir, tempOutputDir);
     }
@@ -353,9 +366,15 @@ async function convertPost(blogId, logNo, options = {}) {
     const hashSourceFilename = `.hash-source-${contentHash.slice(0, 16)}.html`;
     const hashSourcePath = path.join(tempOutputDir, hashSourceFilename);
 
-    if (!fs.existsSync(hashSourcePath)) fs.writeFileSync(hashSourcePath, hashSource, "utf8");
+    if (!fs.existsSync(hashSourcePath)) {
+      fs.writeFileSync(hashSourcePath, hashSource, "utf8");
+    }
 
-    fs.writeFileSync(path.join(tempOutputDir, "original.html"), originalHtml, "utf8");
+    fs.writeFileSync(
+      path.join(tempOutputDir, "original.html"),
+      originalHtml,
+      "utf8"
+    );
 
     console.log("Markdown 생성 중...");
 
@@ -365,7 +384,11 @@ async function convertPost(blogId, logNo, options = {}) {
       editorVersion,
     });
 
-    fs.writeFileSync(path.join(tempOutputDir, "index.md"), markdown, "utf8");
+    fs.writeFileSync(
+      path.join(tempOutputDir, "index.md"),
+      markdown,
+      "utf8"
+    );
 
     fs.writeFileSync(
       path.join(tempOutputDir, "metadata.json"),
@@ -376,44 +399,86 @@ async function convertPost(blogId, logNo, options = {}) {
       "utf8"
     );
 
-    cache = loadBackupCache();
+    /*
+     * 여기부터 output 폴더와 backup-cache.json은 하나의 상태로 취급한다.
+     *
+     * 다른 프로세스의 checkBackupCache(), resource cache 갱신,
+     * 게시글 최종 반영은 이 구간이 끝날 때까지 기다린다.
+     */
+    const lock = acquireBackupLock();
 
-    const currentEntry = cache[cacheKey] && typeof cache[cacheKey] === "object" ? cache[cacheKey] : {};
+    try {
+      cache = loadBackupCacheUnlocked();
 
-    const resources = currentEntry.resources && typeof currentEntry.resources === "object"
-      ? currentEntry.resources
-      : {};
+      /*
+       * 작업을 시작한 뒤 다른 프로세스가 cache를 변경했을 수 있으므로
+       * 최종 반영 직전에 반드시 최신 cache를 다시 읽는다.
+       */
+      const latest = getPreviousCache(cache, blogId, logNo);
 
-    const resourceErrors = currentEntry.resourceErrors && typeof currentEntry.resourceErrors === "object"
-      ? currentEntry.resourceErrors
-      : {};
+      cacheKey = latest.cacheKey;
+      previous = latest.previous;
+      legacyKey = latest.legacyKey;
 
-    if (previousOutputDir && path.resolve(previousOutputDir) !== path.resolve(finalOutputDir)) {
-      console.log(`저장 경로 변경: ${previous.path} → ${relativePath}`);
-      removeDirectory(previousOutputDir);
+      const latestPreviousOutputDir = previous?.path
+        ? path.resolve(process.cwd(), previous.path)
+        : null;
+
+      const currentEntry = cache[cacheKey] && typeof cache[cacheKey] === "object"
+        ? cache[cacheKey]
+        : {};
+
+      const resources = currentEntry.resources && typeof currentEntry.resources === "object"
+        ? currentEntry.resources
+        : {};
+
+      const resourceErrors = currentEntry.resourceErrors && typeof currentEntry.resourceErrors === "object"
+        ? currentEntry.resourceErrors
+        : {};
+
+      /*
+       * 같은 글을 다른 프로세스가 먼저 완료했더라도,
+       * 이 프로세스가 만든 결과를 최종 상태로 반영한다.
+       *
+       * 폴더 삭제/배치와 cache 변경 사이에는 다른 프로세스가
+       * checkBackupCache()를 실행할 수 없다.
+       */
+      if (
+        latestPreviousOutputDir
+        && path.resolve(latestPreviousOutputDir) !== path.resolve(finalOutputDir)
+      ) {
+        console.log(`저장 경로 변경: ${previous.path} → ${relativePath}`);
+
+        removeDirectory(latestPreviousOutputDir);
+      }
+
+      removeDirectory(finalOutputDir);
+      fs.mkdirSync(path.dirname(finalOutputDir), {recursive: true});
+
+      await renameDirectory(tempOutputDir, finalOutputDir);
+
+      cache[cacheKey] = {
+        ...currentEntry,
+        hash: contentHash,
+        modifiedAt: null,
+        title,
+        category,
+        categoryPath: normalizedCategoryParts,
+        editorVersion,
+        path: relativePath,
+        backedUpAt: new Date().toISOString(),
+        resources,
+        resourceErrors,
+      };
+
+      if (legacyKey && legacyKey !== cacheKey) {
+        delete cache[legacyKey];
+      }
+
+      saveBackupCacheUnlocked(cache);
+    } finally {
+      releaseBackupLock(lock);
     }
-
-    removeDirectory(finalOutputDir);
-    fs.mkdirSync(path.dirname(finalOutputDir), {recursive: true});
-    await renameDirectory(tempOutputDir, finalOutputDir);
-
-    cache[cacheKey] = {
-      ...currentEntry,
-      hash: contentHash,
-      modifiedAt: null,
-      title,
-      category,
-      categoryPath: normalizedCategoryParts,
-      editorVersion,
-      path: relativePath,
-      backedUpAt: new Date().toISOString(),
-      resources,
-      resourceErrors,
-    };
-
-    if (legacyKey && legacyKey !== cacheKey) delete cache[legacyKey];
-
-    saveBackupCache(cache);
 
     console.log(`완료: ${relativePath}`);
 
@@ -430,6 +495,7 @@ async function convertPost(blogId, logNo, options = {}) {
     };
   } catch (error) {
     removeDirectory(tempOutputDir);
+
     throw error;
   } finally {
     clearResourceContext();
