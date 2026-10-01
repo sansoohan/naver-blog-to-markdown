@@ -11,6 +11,9 @@ function getPostBody(root) {
    * 현대 에디터:
    *   .se-main-container
    *
+   * 초기 SmartEditor 3:
+   *   .__se_component_area
+   *
    * 구형 에디터:
    *   #postViewArea
    *
@@ -19,23 +22,46 @@ function getPostBody(root) {
    * root 전체에는 게시글과 관계없는 네이버 UI와 동적 값이 포함될 수 있으므로
    * 잘못된 해시를 만드는 것보다 명시적으로 실패하는 편이 안전하다.
    */
-  const selectors = [
-    ".se-main-container",
-    "#postViewArea",
-  ];
 
-  for (const selector of selectors) {
-    if (root.is(selector)) return root;
+  /*
+   * 초기 SmartEditor 3.
+   *
+   * getPostRoot() 단계에서 .se_doc_contents_start 다음의
+   * .__se_component_area를 이미 본문 root로 선택한다.
+   */
+  if (root.is(".__se_component_area")) return root;
 
-    const body = root.find(selector).first();
+  /*
+   * 현대 SmartEditor 3·4.
+   */
+  if (root.is(".se-main-container")) return root;
 
-    if (body.length) return body;
+  const mainContainer = root.find(".se-main-container").first();
+
+  if (mainContainer.length) return mainContainer;
+
+  /*
+   * 초기 SmartEditor 3의 상위 root가 전달된 경우.
+   */
+  const se3ContentsStart = root.find(".se_doc_contents_start").first();
+
+  if (se3ContentsStart.length) {
+    const se3Body = se3ContentsStart.nextAll(".__se_component_area").first();
+
+    if (se3Body.length) return se3Body;
   }
 
   /*
+   * 구형 SmartEditor 1·2.
+   */
+  if (root.is("#postViewArea")) return root;
+
+  const postViewArea = root.find("#postViewArea").first();
+
+  if (postViewArea.length) return postViewArea;
+
+  /*
    * 일부 구형 게시글에서는 전달받은 root 자체가 .post-view일 수 있다.
-   *
-   * .post-view는 게시글 본문 컨테이너로 사용되므로 이 경우에만 root 자체를 허용한다.
    */
   if (root.is(".post-view")) return root;
 
