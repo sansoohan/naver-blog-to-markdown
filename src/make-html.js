@@ -41,7 +41,7 @@ function detectEditorVersion($) {
   if ($(".wrap_rabbit .se-viewer .se-main-container").length) return 4;
 
   /* 버전 3 */
-  if ($(".se-viewer .se-main-container,.se-main-container").length) return 3;
+  if ($(".se-viewer .se-main-container").length) return 3;
 
   return 0;
 }
@@ -79,6 +79,24 @@ function getPostRoot($, editorVersion) {
 
   const mainContainer = $(".se-main-container").first();
   if (mainContainer.length) return mainContainer;
+
+  /*
+   * 초기 SmartEditor 3:
+   * data-post-editor-version="3"이지만 .se-main-container가 아니라
+   * .se_doc_viewer와 .__se_component_area 구조를 사용하는 글이 있다.
+   *
+   * .se_doc_viewer 전체에는 제목, 작성자, 작성일 등의 헤더가 포함되므로
+   * 실제 게시글 내용이 들어 있는 컴포넌트 영역만 root로 사용한다.
+   */
+  if (editorVersion === 3) {
+    const contentsStart = $(".se_doc_contents_start").first();
+
+    if (contentsStart.length) {
+      const version3 = contentsStart.nextAll(".__se_component_area").first();
+
+      if (version3.length) return version3;
+    }
+  }
 
   const version12 = getVersion12PostRoot($);
   if (version12.length) return version12;
@@ -498,4 +516,4 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   return restorePostBody(beautifyArchivedHtml(html), protectedBody);
 }
 
-module.exports = {makeHtml, getPostRoot, detectEditorVersion};
+module.exports = {makeHtml, getPostRoot, detectEditorVersion, getVersion12PostRoot};
