@@ -24,7 +24,7 @@
 
 현재 글이 저장된 폴더를 바로 열 수 있으며, 파일을 직접 수정한 뒤 새로고침하여 변경 내용을 반영할 수 있습니다.
 
-![녹화3_새로고침_해당폴더로_이동_3fps](https://github.com/sansoohan/naver-blog-to-markdown/releases/download/readme-gifs-1.4.1/3_._._._3fps.gif)
+![녹화3_새로고침_해당폴더로_이동_3fps](https://github.com/sansoohan/naver-blog-to-markdown/releases/download/readme-gifs-1.4.2/3_._._._3fps_.gif)
 
 ---
 
