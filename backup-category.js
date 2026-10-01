@@ -82,6 +82,7 @@ async function backupPosts(blogId, posts, options = {}) {
       skipped: 0,
       failed: 0,
       updatedPosts: [],
+      failedPosts: [],
     };
   }
 
@@ -93,6 +94,7 @@ async function backupPosts(blogId, posts, options = {}) {
   let skipped = 0;
   let failed = 0;
   const updatedPosts = [];
+  const failedPosts = [];
 
   if (update) {
     console.log("업데이트 확인 모드로 백업을 시작합니다.\n");
@@ -142,6 +144,13 @@ async function backupPosts(blogId, posts, options = {}) {
       cachedPostKeys.delete(legacyKey);
     } catch (error) {
       failed++;
+
+      failedPosts.push({
+        logNo: post.logNo,
+        title: post.title,
+        error: error.message,
+      });
+
       console.error(`실패: ${post.logNo} - ${error.message}`);
     }
 
@@ -155,6 +164,7 @@ async function backupPosts(blogId, posts, options = {}) {
     skipped,
     failed,
     updatedPosts,
+    failedPosts,
   };
 }
 
@@ -181,6 +191,15 @@ function printBackupSummary(label, result, options = {}) {
 
     for (const post of result.updatedPosts) {
       console.log(`${post.logNo} ${post.title}`);
+    }
+  }
+
+  if (result.failedPosts.length) {
+    console.log("\n실패한 글:");
+
+    for (const post of result.failedPosts) {
+      console.log(`${post.logNo} ${post.title || ""}`);
+      console.log(`  ${post.error}`);
     }
   }
 }
