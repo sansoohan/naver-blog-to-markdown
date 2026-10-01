@@ -2,6 +2,7 @@ const { isSimpleTable, renderSimpleTable, renderComplexTable } = require("./rend
 const {
   shouldMakeTableTransparent,
   makeTableBackgroundTransparent,
+  fillTransparentCellBackgrounds,
   normalizeLegacyTableWidths,
   ensureLegacyTableFontColor,
 } = require("./legacy");
@@ -88,21 +89,18 @@ function protectTables($, root, store) {
     cloned.addClass("naver-legacy-table");
 
     /*
-     * shouldMakeTableTransparent() 내부에서
+     * 먼저 표 전체를 투명화할 수 있는지 판정한다.
      *
-     * 1. 셀 배경색 보정
-     * 2. 보정된 셀 배경색 비교
-     * 3. 폰트색 / 글자 배경 검사
-     *
-     * 순서로 처리한다.
-     *
-     * 조건을 통과하면 그때 전체 투명화한다.
+     * 투명화 대상이면 고정 시각 서식을 제거하고,
+     * 투명화 대상이 아니면 실제 배경이 투명한 셀만 흰색으로 채운다.
      */
     const transparentTable = shouldMakeTableTransparent($, cloned);
 
     if (transparentTable) {
       makeTableBackgroundTransparent($, cloned);
       cloned.addClass("naver-legacy-table-transparent");
+    } else {
+      fillTransparentCellBackgrounds($, cloned);
     }
 
     /*
