@@ -6,6 +6,12 @@ const {makeHtml, detectEditorVersion, getVersion12PostRoot} = require("./src/mak
 const {makeMarkdown} = require("./src/make-markdown");
 const {createContentHash} = require("./src/content-hash");
 const {
+  getCategoryList,
+  getCategoryPathParts,
+  getAllPosts,
+  updateCategories,
+} = require("./src/category");
+const {
   setBackupOutputRoot,
   loadBackupCache,
   loadBackupCacheUnlocked,
@@ -262,15 +268,9 @@ async function resolvePostCategoryPath($, blogId, logNo, options = {}) {
   } = options;
   const categoryNo = extractPostCategoryNo($);
 
-  /*
-   * backup-category.js가 backup-page.js를 불러오므로 파일 위쪽에서 불러오지 않는다.
-   * convertPost()가 실행되는 시점에는 backup-page.js의 export가 끝난 상태라
-   * 순환 참조가 발생하지 않는다.
-   */
-  const {getCategoryList, getCategoryPathParts, updateCategories} = require("./backup-category");
   const categories = await getCategoryList(blogId, {includePrivate});
 
-  if (!categoryUpdated) updateCategories(categories, outputDir);
+  if (!categoryUpdated) updateCategories(categories, outputDir, blogId);
 
   const currentCategory = categories.find(category => String(category.categoryNo) === String(categoryNo));
 
@@ -288,7 +288,6 @@ async function resolvePostCategoryPath($, blogId, logNo, options = {}) {
 async function resolvePostOpenType($, blogId, logNo, options = {}) {
   const {includePrivate = false} = options;
   const categoryNo = extractPostCategoryNo($);
-  const {getAllPosts} = require("./src/category");
   const posts = await getAllPosts(blogId, categoryNo, {
     quiet: true,
     includePrivate,
@@ -305,6 +304,7 @@ async function convertPost(blogId, logNo, options = {}) {
   const {
     skipUnchanged = false,
     categoryPath = null,
+    categoryNo: suppliedCategoryNo = null,
     title: suppliedTitle = "",
     openType: suppliedOpenType = null,
     includePrivate = false,
@@ -329,6 +329,10 @@ async function convertPost(blogId, logNo, options = {}) {
   const $ = cheerio.load(rawHtml, {decodeEntities: false});
   const editorVersion = detectEditorVersion($);
   const root = getPostRoot($, editorVersion);
+
+  const categoryNo = suppliedCategoryNo === null || suppliedCategoryNo === undefined
+    ? extractPostCategoryNo($)
+    : String(suppliedCategoryNo);
 
   const openType = suppliedOpenType === null || suppliedOpenType === undefined
     ? await resolvePostOpenType($, blogId, logNo, {includePrivate})
@@ -387,6 +391,7 @@ async function convertPost(blogId, logNo, options = {}) {
       blogId,
       logNo,
       title,
+      categoryNo,
       category,
       categoryPath: normalizedCategoryParts,
       editorVersion,
@@ -544,6 +549,7 @@ async function convertPost(blogId, logNo, options = {}) {
         hash: contentHash,
         modifiedAt: null,
         title,
+        categoryNo,
         category,
         categoryPath: normalizedCategoryParts,
         openType,
@@ -570,6 +576,7 @@ async function convertPost(blogId, logNo, options = {}) {
       blogId,
       logNo,
       title,
+      categoryNo,
       category,
       categoryPath: normalizedCategoryParts,
       editorVersion,
