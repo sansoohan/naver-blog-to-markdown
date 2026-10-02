@@ -3,6 +3,7 @@ const path = require("path");
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
 const {setBackupOutputRoot, checkBackupCache} = require("./src/backup-cache");
+const backupMonitor = require("./src/backup-monitor");
 const {runCli} = require("./src/cli");
 const {
   parseBlogUrl,
@@ -96,11 +97,12 @@ async function backupPosts(blogId, posts, options = {}) {
   } = options;
 
   setBackupOutputRoot(outputDir);
+  backupMonitor.start(outputDir, blogId, posts.length);
 
   if (!posts.length) {
     console.log("백업할 게시글이 없습니다.");
 
-    return {
+    const result = {
       total: 0,
       created: 0,
       updated: 0,
@@ -109,6 +111,10 @@ async function backupPosts(blogId, posts, options = {}) {
       updatedPosts: [],
       failedPosts: [],
     };
+
+    backupMonitor.complete(blogId, result);
+
+    return result;
   }
 
   const cache = checkBackupCache();
@@ -144,6 +150,8 @@ async function backupPosts(blogId, posts, options = {}) {
       continue;
     }
 
+    backupMonitor.startPost(index + 1, posts.length, post);
+
     try {
       const result = await convertPost(blogId, post.logNo, {
         skipUnchanged: update,
@@ -169,6 +177,8 @@ async function backupPosts(blogId, posts, options = {}) {
 
       cachedPostKeys.add(cacheKey);
       cachedPostKeys.delete(legacyKey);
+
+      backupMonitor.completePost();
     } catch (error) {
       failed++;
 
@@ -179,12 +189,13 @@ async function backupPosts(blogId, posts, options = {}) {
       });
 
       console.error(`실패: ${post.logNo} - ${error.message}`);
+      backupMonitor.failPost(error);
     }
 
     console.log("");
   }
 
-  return {
+  const result = {
     total: posts.length,
     created,
     updated,
@@ -193,6 +204,10 @@ async function backupPosts(blogId, posts, options = {}) {
     updatedPosts,
     failedPosts,
   };
+
+  backupMonitor.complete(blogId, result);
+
+  return result;
 }
 
 function printBackupSummary(label, result, options = {}) {
