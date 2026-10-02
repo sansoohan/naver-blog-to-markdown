@@ -336,18 +336,31 @@ async function resolveDownloadFilename(url, response, buffer, options = {}) {
 }
 
 async function download(url, options = {}) {
+  const defaultOptions = {
+    outputDir: "",
+    logLabel: "파일",
+    overwrite: false,
+    retries: 1,
+    timeout: 10000,
+  };
+
+  const requestOptions = {
+    ...defaultOptions,
+    ...options,
+  };
+
+  const {
+    outputDir,
+    logLabel,
+    overwrite,
+    retries,
+  } = requestOptions;
+
   const source = normalizeUrl(url);
 
   if (!source) {
     throw new Error("다운로드 URL이 없습니다.");
   }
-
-  const {
-    outputDir = "",
-    logLabel = "파일",
-    overwrite = false,
-    retries = 0,
-  } = options;
 
   /*
    * 이전 실행에서 이 URL 자체가 실패했다면
@@ -387,7 +400,7 @@ async function download(url, options = {}) {
   let headMetadata = null;
 
   try {
-    const head = await fetchResourceMetadata(source, options);
+    const head = await fetchResourceMetadata(source, requestOptions);
     headMetadata = head.metadata;
   } catch {}
 
@@ -395,7 +408,7 @@ async function download(url, options = {}) {
     const cached = getResourceState(headMetadata);
 
     if (cached?.status === "ok") {
-      const result = copyCachedResource(cached, source, options);
+      const result = copyCachedResource(cached, source, requestOptions);
 
       console.log(`${logLabel} 캐시 재사용: ${result.filename}`);
 
@@ -418,7 +431,7 @@ async function download(url, options = {}) {
    */
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
-      fetched = await fetchResource(source, options);
+      fetched = await fetchResource(source, requestOptions);
       fetchError = null;
       break;
     } catch (error) {
@@ -457,7 +470,7 @@ async function download(url, options = {}) {
       fetched.buffer,
       fetched.response,
       source,
-      options
+      requestOptions
     );
   } catch (error) {
     /*
@@ -473,7 +486,7 @@ async function download(url, options = {}) {
     source,
     fetched.response,
     buffer,
-    options
+    requestOptions
   );
 
   if (!outputDir) {
@@ -517,7 +530,7 @@ async function download(url, options = {}) {
   const originalFilename = getOriginalFilename(
     source,
     fetched.response,
-    options
+    requestOptions
   );
 
   const resourceMetadata = {
