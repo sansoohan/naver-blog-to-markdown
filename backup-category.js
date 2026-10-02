@@ -1,5 +1,3 @@
-const fs = require("fs");
-const path = require("path");
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
 const {setBackupOutputRoot, checkBackupCache} = require("./src/backup-cache");
@@ -13,8 +11,8 @@ const {
   getAllPosts,
   getAllCategoryPosts,
   getCategoryPosts,
-  getLeafCategories,
   getPostCategories,
+  updateCategories,
 } = require("./src/category");
 
 function ask(question) {
@@ -24,27 +22,6 @@ function ask(question) {
     rl.close();
     resolve(answer.trim());
   }));
-}
-
-function updateCategories(categories, outputDir) {
-  const outputRoot = outputDir ? path.resolve(outputDir) : path.join(process.cwd(), "output");
-  const data = {};
-
-  for (const category of categories) {
-    data[category.categoryNo] = {
-      name: category.name,
-      parentCategoryNo: category.parentCategoryNo,
-      visibility: category.visibility,
-    };
-  }
-
-  fs.mkdirSync(outputRoot, {recursive: true});
-
-  fs.writeFileSync(
-    path.join(outputRoot, "categories.json"),
-    `${JSON.stringify(data, null, 2)}\n`,
-    "utf8"
-  );
 }
 
 async function selectCategory(categories, inputName = "") {
@@ -156,6 +133,7 @@ async function backupPosts(blogId, posts, options = {}) {
       const result = await convertPost(blogId, post.logNo, {
         skipUnchanged: update,
         categoryPath: post.categoryPath,
+        categoryNo: post.categoryNo,
         title: post.title,
         openType: post.openType,
         includePrivate,
@@ -260,7 +238,7 @@ async function backupAllCategories(url, options = {}) {
   console.log("카테고리 목록을 가져오는 중...");
 
   const categories = await getCategoryList(blogId, {includePrivate});
-  updateCategories(categories, outputDir);
+  updateCategories(categories, outputDir, blogId);
   const targetCategories = getPostCategories(categories);
 
   console.log(`확인할 카테고리: ${targetCategories.length}개`);
@@ -298,7 +276,7 @@ async function backupCategory(url, categoryName = "", options = {}) {
   console.log("카테고리 목록을 가져오는 중...");
 
   const categories = await getCategoryList(blogId, {includePrivate});
-  updateCategories(categories, outputDir);
+  updateCategories(categories, outputDir, blogId);
   const category = await selectCategory(categories, categoryName);
 
   console.log(`\n선택: ${formatCategory(category, categories)}`);
