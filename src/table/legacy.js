@@ -3,56 +3,74 @@ function getSpan(cell, name) {
   return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
-function getCellBackgroundColor(cell) {
-  const style = cell.attr("style") || "";
-
-  /*
-   * 1. background-color
-   *
-   * CSS가 존재하면 bgcolor보다 우선한다.
-   * transparent도 명시적인 CSS 값이므로
-   * bgcolor까지 내려가지 않고 투명으로 처리한다.
-   */
-  const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
-
-  if (backgroundColorMatch) {
-    const color = backgroundColorMatch[1].trim();
-
-    return normalizeStyleColor(color) === "transparent"
-      ? ""
-      : color;
-  }
-
-  /*
-   * 2. background shorthand
-   *
-   * background:transparent 역시 bgcolor보다 우선한다.
-   */
-  const backgroundMatch = style.match(
-    /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
-  );
-
-  if (backgroundMatch) {
-    const color = backgroundMatch[1].trim();
-
-    return normalizeStyleColor(color) === "transparent"
-      ? ""
-      : color;
-  }
-
-  /*
-   * 3. CSS background가 아예 지정되지 않은 경우에만
-   * 구형 HTML bgcolor를 사용한다.
-   */
-  const bgcolor = cell.attr("bgcolor");
-
-  if (bgcolor) return String(bgcolor).trim();
-
-  return "";
+function normalizeStyleColor(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
-function normalizeStyleColor(value) {
-  return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
+function getCellBackgroundColor(cell) {
+  let node = cell;
+
+  while (node && node.length) {
+    const style = node.attr("style") || "";
+
+    /*
+     * background-color
+     */
+    const backgroundColorMatch = style.match(/(?:^|;)\s*background-color\s*:\s*([^;]+)/i);
+
+    if (backgroundColorMatch) {
+      const color = backgroundColorMatch[1].trim();
+
+      if (normalizeStyleColor(color) !== "transparent") {
+        return color;
+      }
+    } else {
+      /*
+       * background shorthand
+       */
+      const backgroundMatch = style.match(
+        /(?:^|;)\s*background\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\)|[a-z]+)(?:\s|;|$)/i
+      );
+
+      if (backgroundMatch) {
+        const color = backgroundMatch[1].trim();
+
+        if (normalizeStyleColor(color) !== "transparent") {
+          return color;
+        }
+      } else {
+        /*
+         * CSS background가 지정되지 않은 경우에만
+         * 구형 HTML bgcolor를 사용한다.
+         */
+        const bgcolor = node.attr("bgcolor");
+
+        if (bgcolor) {
+          const color = String(bgcolor).trim();
+
+          if (normalizeStyleColor(color) !== "transparent") {
+            return color;
+          }
+        }
+      }
+    }
+
+    /*
+     * 현재 셀이 속한 table까지만 역방향으로 추적한다.
+     *
+     * td/th
+     * → tr
+     * → tbody/thead/tfoot
+     * → table
+     */
+    const tagName = String(node[0]?.name || "").toLowerCase();
+
+    if (tagName === "table") break;
+
+    node = node.parent();
+  }
+
+  return "";
 }
 
 /*
