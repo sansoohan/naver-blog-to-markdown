@@ -18,10 +18,12 @@ const {
   saveBackupCacheUnlocked,
   acquireBackupLock,
   releaseBackupLock,
+} = require("./src/cache-html");
+const {
   setResourceContext,
   clearResourceContext,
   finalizeResources,
-} = require("./src/backup-cache");
+} = require("./src/cache-resource");
 const {runCli} = require("./src/cli");
 
 const PostVisibility = {

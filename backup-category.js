@@ -1,6 +1,6 @@
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
-const {setBackupOutputRoot, checkBackupCache} = require("./src/backup-cache");
+const {setBackupOutputRoot, checkBackupCache} = require("./src/cache-html");
 const backupMonitor = require("./src/backup-monitor");
 const {runCli} = require("./src/cli");
 const {
