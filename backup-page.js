@@ -14,6 +14,7 @@ const {
   releaseBackupLock,
   setResourceContext,
   clearResourceContext,
+  finalizeResources,
 } = require("./src/backup-cache");
 const {runCli} = require("./src/cli");
 
@@ -507,9 +508,11 @@ async function convertPost(blogId, logNo, options = {}) {
         ? cache[cacheKey]
         : {};
 
-      const resources = currentEntry.resources && typeof currentEntry.resources === "object"
+      const currentResources = currentEntry.resources && typeof currentEntry.resources === "object"
         ? currentEntry.resources
         : {};
+
+      const resources = finalizeResources(currentResources);
 
       const resourceErrors = currentEntry.resourceErrors && typeof currentEntry.resourceErrors === "object"
         ? currentEntry.resourceErrors
