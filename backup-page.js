@@ -6,6 +6,7 @@ const {makeHtml, detectEditorVersion, getVersion12PostRoot} = require("./src/mak
 const {makeMarkdown} = require("./src/make-markdown");
 const {createContentHash} = require("./src/content-hash");
 const {
+  setBackupOutputRoot,
   loadBackupCache,
   loadBackupCacheUnlocked,
   saveBackupCacheUnlocked,
