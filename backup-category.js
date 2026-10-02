@@ -147,6 +147,7 @@ async function backupPosts(blogId, posts, options = {}) {
         skipUnchanged: update,
         categoryPath: post.categoryPath,
         title: post.title,
+        openType: post.openType,
         includePrivate,
         categoryUpdated: true,
         update,

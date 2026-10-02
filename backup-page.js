@@ -16,6 +16,13 @@ const {
 } = require("./src/backup-cache");
 const {runCli} = require("./src/cli");
 
+const PostVisibility = {
+  "0": "private",
+  "1": "neighbor",
+  "2": "public",
+  "3": "mutual",
+};
+
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -276,11 +283,28 @@ async function resolvePostCategoryPath($, blogId, logNo, options = {}) {
   return categoryPath;
 }
 
+async function resolvePostOpenType($, blogId, logNo, options = {}) {
+  const {includePrivate = false} = options;
+  const categoryNo = extractPostCategoryNo($);
+  const {getAllPosts} = require("./src/category");
+  const posts = await getAllPosts(blogId, categoryNo, {
+    quiet: true,
+    includePrivate,
+  });
+
+  const post = posts.find(post => String(post.logNo) === String(logNo));
+
+  if (!post) throw new Error(`게시글 ${logNo}의 공개 설정을 찾을 수 없습니다.`);
+
+  return post.openType;
+}
+
 async function convertPost(blogId, logNo, options = {}) {
   const {
     skipUnchanged = false,
     categoryPath = null,
     title: suppliedTitle = "",
+    openType: suppliedOpenType = null,
     includePrivate = false,
     categoryUpdated = false,
     update = false,
@@ -301,6 +325,17 @@ async function convertPost(blogId, logNo, options = {}) {
   const $ = cheerio.load(rawHtml, {decodeEntities: false});
   const editorVersion = detectEditorVersion($);
   const root = getPostRoot($, editorVersion);
+
+  const openType = suppliedOpenType === null || suppliedOpenType === undefined
+    ? await resolvePostOpenType($, blogId, logNo, {includePrivate})
+    : suppliedOpenType;
+
+  const visibility = PostVisibility[String(openType)];
+
+  if (!visibility) throw new Error(`알 수 없는 게시글 공개 설정입니다: ${openType}`);
+
+  root.attr("data-naver-open-type", String(openType));
+
   const {hash: contentHash, source: hashSource} = createContentHash(root);
 
   console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
@@ -435,6 +470,7 @@ async function convertPost(blogId, logNo, options = {}) {
       `${JSON.stringify({
         title,
         url: `https://blog.naver.com/${blogId}/${logNo}`,
+        visibility,
       }, null, 2)}\n`,
       "utf8"
     );
@@ -504,6 +540,7 @@ async function convertPost(blogId, logNo, options = {}) {
         title,
         category,
         categoryPath: normalizedCategoryParts,
+        openType,
         editorVersion,
         path: relativePath,
         backedUpAt: new Date().toISOString(),
