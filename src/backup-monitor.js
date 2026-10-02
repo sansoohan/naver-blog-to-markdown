@@ -5,6 +5,10 @@ let logFile = "";
 let currentPost = null;
 let completed = true;
 let handlersInstalled = false;
+let outputLoggingInstalled = false;
+
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
 function getTimestamp() {
   const now = new Date();
@@ -43,18 +47,30 @@ function getCommand() {
   }).join(" ");
 }
 
-function writeLog(message) {
+function writeOutput(chunk) {
   if (!logFile) return;
 
   try {
-    fs.appendFileSync(
-      logFile,
-      `[${getTimestamp()}] ${message}\n`,
-      "utf8"
-    );
+    fs.appendFileSync(logFile, chunk, "utf8");
   } catch (error) {
-    console.error(`백업 로그 기록 실패: ${error.message}`);
+    originalStderrWrite(`백업 로그 기록 실패: ${error.message}\n`);
   }
+}
+
+function installOutputLogging() {
+  if (outputLoggingInstalled) return;
+
+  outputLoggingInstalled = true;
+
+  process.stdout.write = function(chunk, encoding, callback) {
+    writeOutput(chunk);
+    return originalStdoutWrite(chunk, encoding, callback);
+  };
+
+  process.stderr.write = function(chunk, encoding, callback) {
+    writeOutput(chunk);
+    return originalStderrWrite(chunk, encoding, callback);
+  };
 }
 
 function formatCurrentPost() {
@@ -69,7 +85,6 @@ function logCurrentPost() {
   if (!post) return;
 
   console.error(`처리 중이던 글: ${post}`);
-  writeLog(`처리 중이던 글: ${post}`);
 }
 
 function installHandlers() {
@@ -83,20 +98,11 @@ function installHandlers() {
     const message = `예상하지 못한 종료: beforeExit (${code})`;
 
     console.error(`\n${message}`);
-    writeLog(message);
     logCurrentPost();
   });
 
   process.on("uncaughtException", error => {
     console.error("\n처리되지 않은 예외:", error);
-
-    writeLog(
-      `처리되지 않은 예외: ${
-        error instanceof Error
-          ? error.stack || error.message
-          : String(error)
-      }`
-    );
 
     logCurrentPost();
 
@@ -105,14 +111,6 @@ function installHandlers() {
 
   process.on("unhandledRejection", reason => {
     console.error("\n처리되지 않은 Promise 오류:", reason);
-
-    writeLog(
-      `처리되지 않은 Promise 오류: ${
-        reason instanceof Error
-          ? reason.stack || reason.message
-          : String(reason)
-      }`
-    );
 
     logCurrentPost();
 
@@ -131,10 +129,11 @@ function start(outputDir, blogId, total) {
   currentPost = null;
   completed = false;
 
+  installOutputLogging();
   installHandlers();
 
-  writeLog(`COMMAND ${getCommand()}`);
-  writeLog(`백업 시작: ${blogId} / 전체 ${total}개`);
+  console.log(`COMMAND ${getCommand()}`);
+  console.log(`백업 시작: ${blogId} / 전체 ${total}개`);
 }
 
 function startPost(index, total, post) {
@@ -145,11 +144,11 @@ function startPost(index, total, post) {
     title: post.title,
   };
 
-  writeLog(`START ${formatCurrentPost()}`);
+  console.log(`START ${formatCurrentPost()}`);
 }
 
 function completePost() {
-  writeLog(`COMPLETE ${formatCurrentPost()}`);
+  console.log(`COMPLETE ${formatCurrentPost()}`);
   currentPost = null;
 }
 
@@ -159,15 +158,8 @@ function failPost(error) {
     ? error.stack || error.message
     : String(error);
 
-  const lines = [
-    `FAILED ${post}`,
-    ...detail.split(/\r?\n/).map(line => `  ${line}`),
-  ];
-
-  for (const line of lines) {
-    console.error(line);
-    writeLog(line);
-  }
+  console.error(`FAILED ${post}`);
+  console.error(detail);
 
   currentPost = null;
 }
@@ -176,7 +168,7 @@ function complete(blogId, result) {
   currentPost = null;
   completed = true;
 
-  writeLog(
+  console.log(
     `백업 완료: ${blogId} / 전체 ${result.total}개 / 신규 ${result.created} / 업데이트 ${result.updated} / 건너뜀 ${result.skipped} / 실패 ${result.failed}`
   );
 }
