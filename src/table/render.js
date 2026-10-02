@@ -27,14 +27,11 @@ table.naver-legacy-table td:not([style*="padding" i]) {
   padding: 1px !important;
 }
 
-table.naver-legacy-table:not(.naver-legacy-table-transparent):not([style*="border" i]),
-table.naver-legacy-table:not(.naver-legacy-table-transparent) table:not([style*="border" i]) {
-  border: none !important;
-}
-
-table.naver-legacy-table:not(.naver-legacy-table-transparent) th:not([style*="border" i]),
-table.naver-legacy-table:not(.naver-legacy-table-transparent) td:not([style*="border" i]) {
-  border: none !important;
+table.naver-legacy-table:not(.naver-legacy-table-transparent),
+table.naver-legacy-table:not(.naver-legacy-table-transparent) table,
+table.naver-legacy-table:not(.naver-legacy-table-transparent) th,
+table.naver-legacy-table:not(.naver-legacy-table-transparent) td {
+  border: none;
 }
 
 table.naver-legacy-table th,
