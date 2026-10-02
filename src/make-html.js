@@ -245,6 +245,16 @@ function prepareWrapperPath(root, editorVersion) {
     }
 
     const descriptor = getElementDescriptor(current.get(0));
+
+    if (descriptor && current.hasClass("post-body")) {
+      /*
+       * .post-body는 레이아웃용 table이라 width:auto 상태에서는 본문 내용에 따라 폭이 줄어들 수 있다.
+       * #content-area의 전체 폭을 유지하지 않으면 SmartEditor 본문 폭도 함께 줄어드므로 100%를 강제한다.
+       */
+      const style = descriptor.attributes.style || "";
+      descriptor.attributes.style = `${style}${style && !style.trim().endsWith(";") ? ";" : ""}width:100%;`;
+    }
+
     if (descriptor) wrappers.unshift(descriptor);
     current = current.parent();
   }
