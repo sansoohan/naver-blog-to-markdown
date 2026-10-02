@@ -95,6 +95,31 @@ function getRequestSignal(options = {}) {
   return undefined;
 }
 
+function isNetworkError(error) {
+  if (!error) return false;
+
+  if (error.name === "AbortError" || error.name === "TimeoutError") {
+    return true;
+  }
+
+  if (error instanceof TypeError && error.message === "fetch failed") {
+    return true;
+  }
+
+  const code = error.code || error.cause?.code;
+
+  return [
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ENETDOWN",
+    "ENETUNREACH",
+    "EHOSTUNREACH",
+    "ETIMEDOUT",
+    "EAI_AGAIN",
+    "ENOTFOUND",
+  ].includes(code);
+}
+
 function getHeaderSize(response) {
   const value = response.headers.get("content-length");
 
@@ -440,7 +465,10 @@ async function download(url, options = {}) {
   }
 
   if (!fetched) {
-    setResourceError(source, fetchError);
+    if (!isNetworkError(fetchError)) {
+      setResourceError(source, fetchError);
+    }
+
     throw fetchError;
   }
 
