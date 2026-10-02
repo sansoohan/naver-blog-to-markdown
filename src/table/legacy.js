@@ -511,18 +511,37 @@ function normalizeLegacyTableWidths($, table) {
 }
 
 /*
- * 구형 표 자체에 기본 폰트색이 없으면 검은색을 기본값으로 지정한다.
+ * 구형 SmartEditor 표가 부모 요소에서 상속받는 폰트색이 있는지 확인한다.
  *
- * table 자체에 지정된 color만 확인한다.
- * 셀 / span / font의 개별 폰트색은 부분 서식이므로 건드리지 않는다.
+ * table부터 .post-body까지 올라가며 color를 확인한다.
+ * color가 확인되면 더 이상 부모를 거슬러 올라가지 않는다.
  */
-function ensureLegacyTableFontColor(table) {
-  const style = table.attr("style") || "";
+function hasInheritedLegacyTableFontColor(table) {
+  let node = table;
 
-  if (/(?:^|;)\s*color\s*:\s*[^;]+/i.test(style)) return;
-  if (table.attr("color")) return;
+  while (node && node.length) {
+    const style = node.attr("style") || "";
 
-  table.attr("style", `${style}${style.trim() && !style.trim().endsWith(";") ? ";" : ""}color:#000;`);
+    if (/(?:^|;)\s*color\s*:\s*[^;]+/i.test(style)) return true;
+    if (node.attr("color")) return true;
+
+    if (node.hasClass("post-body")) break;
+
+    node = node.parent();
+  }
+
+  return false;
+}
+
+/*
+ * 구형 표 자체와 부모 요소에 기본 폰트색이 없으면 검은색을 기본값으로 지정한다.
+ */
+function ensureLegacyTableFontColor(table, cloned) {
+  if (hasInheritedLegacyTableFontColor(table)) return;
+
+  const style = cloned.attr("style") || "";
+
+  cloned.attr("style", `${style}${style.trim() && !style.trim().endsWith(";") ? ";" : ""}color:#000;`);
 }
 
 module.exports = {

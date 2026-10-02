@@ -71,7 +71,7 @@ function protectTables($, root, store) {
      * 투명화한 표는 원래의 고정 폰트색까지 제거한 상태이므로
      * table에 color:#000을 다시 추가하면 안 된다.
      */
-    if (!transparentTable) ensureLegacyTableFontColor(cloned);
+    if (!transparentTable) ensureLegacyTableFontColor(table, cloned);
 
     /*
      * 원본 구형 HTML에는 table 내부에
