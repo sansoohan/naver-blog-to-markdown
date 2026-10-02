@@ -316,6 +316,8 @@ async function convertPost(blogId, logNo, options = {}) {
   const reuseResources = update || useCache;
   const outputRoot = outputDir ? path.resolve(outputDir) : path.join(process.cwd(), "output");
 
+  setBackupOutputRoot(outputRoot);
+
   blogId = String(blogId);
   logNo = String(logNo);
 

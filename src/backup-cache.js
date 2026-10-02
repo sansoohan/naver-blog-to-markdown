@@ -1,9 +1,18 @@
 const fs = require("fs");
 const path = require("path");
 
-const OUTPUT_ROOT = path.resolve(process.cwd(), "output");
-const CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
-const LOCK_FILE = path.join(OUTPUT_ROOT, ".backup-cache.lock");
+let OUTPUT_ROOT = path.resolve(process.cwd(), "output");
+let CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
+let LOCK_FILE = path.join(OUTPUT_ROOT, ".backup-cache.lock");
+
+function setBackupOutputRoot(outputDir) {
+  OUTPUT_ROOT = outputDir
+    ? path.resolve(outputDir)
+    : path.resolve(process.cwd(), "output");
+
+  CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
+  LOCK_FILE = path.join(OUTPUT_ROOT, ".backup-cache.lock");
+}
 
 /*
  * 현재 처리 중인 게시글.
@@ -801,6 +810,7 @@ function relocateResourcePaths() {}
 
 module.exports = {
   CACHE_FILE,
+  setBackupOutputRoot,
   loadBackupCache,
   loadBackupCacheUnlocked,
   saveBackupCache,
