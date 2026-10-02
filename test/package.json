@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail --names client,server \"vite\" \"npm run dev --prefix server\"",
+    "dev": "node run.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

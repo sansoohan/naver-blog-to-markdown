@@ -7,11 +7,11 @@
     "page": "node backup-page.js",
     "category": "node backup-category.js",
     "blog": "node backup-blog.js",
-    "test": "npm run dev --prefix test",
+    "test": "npm run dev --prefix test --",
     "p": "node backup-page.js",
     "c": "node backup-category.js",
     "b": "node backup-blog.js",
-    "t": "npm run dev --prefix test"
+    "t": "npm run dev --prefix test --"
   },
   "keywords": [],
   "author": "",

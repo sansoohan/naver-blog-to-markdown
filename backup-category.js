@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
-const {checkBackupCache} = require("./src/backup-cache");
+const {setBackupOutputRoot, checkBackupCache} = require("./src/backup-cache");
 const {runCli} = require("./src/cli");
 const {
   parseBlogUrl,
@@ -94,6 +94,8 @@ async function backupPosts(blogId, posts, options = {}) {
     useCache = false,
     outputDir = "",
   } = options;
+
+  setBackupOutputRoot(outputDir);
 
   if (!posts.length) {
     console.log("백업할 게시글이 없습니다.");

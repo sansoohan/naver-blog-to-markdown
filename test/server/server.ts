@@ -10,7 +10,38 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-const OUTPUT_ROOT = path.join(PROJECT_ROOT, "output");
+
+function getOutputRoot(): string {
+  const args = process.argv.slice(2);
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+
+    if (arg === "--output" || arg === "-o") {
+      const outputDir = args[index + 1];
+
+      if (!outputDir) {
+        throw new Error(`${arg} 뒤에 output 경로가 필요합니다.`);
+      }
+
+      return path.resolve(outputDir);
+    }
+
+    if (arg.startsWith("--output=")) {
+      const outputDir = arg.slice("--output=".length);
+
+      if (!outputDir) {
+        throw new Error("--output 뒤에 output 경로가 필요합니다.");
+      }
+
+      return path.resolve(outputDir);
+    }
+  }
+
+  return path.join(PROJECT_ROOT, "output");
+}
+
+const OUTPUT_ROOT = getOutputRoot();
 
 const PORT = 3001;
 
