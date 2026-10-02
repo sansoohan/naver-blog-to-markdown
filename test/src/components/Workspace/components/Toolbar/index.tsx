@@ -79,6 +79,10 @@ function Toolbar({
         aria-label="카테고리 선택"
         title="카테고리 선택 (Ctrl + J)"
       >
+        {!currentPost && (
+          <option value="">카테고리 선택</option>
+        )}
+
         {categories.map(category => (
           <option key={category} value={category}>
             {category || "(카테고리 없음)"}
