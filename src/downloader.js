@@ -110,10 +110,6 @@ function getHeaderSize(response) {
   return Number.isFinite(size) && size > 0 ? Math.trunc(size) : 0;
 }
 
-function getResponseEtag(response) {
-  return String(response.headers.get("etag") || "").trim();
-}
-
 function getOriginalFilename(url, response, options = {}) {
   const disposition = response?.headers?.get("content-disposition") || "";
   const dispositionFilename = getFilenameFromDisposition(disposition);
@@ -143,7 +139,6 @@ function getResourceMetadata(url, response, options = {}) {
   return {
     filename,
     size,
-    etag: getResponseEtag(response) || null,
   };
 }
 
@@ -168,7 +163,6 @@ function copyCachedResource(cached, url, options = {}) {
       resource: {
         filename: cached.filename,
         size: cached.size,
-        etag: cached.etag || null,
       },
     };
   }
@@ -208,7 +202,6 @@ function copyCachedResource(cached, url, options = {}) {
   setResource({
     filename: cached.filename,
     size: cached.size,
-    etag: cached.etag || null,
   }, destination);
 
   return {
@@ -221,7 +214,6 @@ function copyCachedResource(cached, url, options = {}) {
     resource: {
       filename: cached.filename,
       size: cached.size,
-      etag: cached.etag || null,
     },
   };
 }
@@ -394,7 +386,7 @@ async function download(url, options = {}) {
    *
    * HEAD
    *   ↓
-   * filename + Content-Length + ETag
+   * filename + Content-Length
    *   ↓
    * resources cache 확인
    *   ↓
@@ -479,7 +471,6 @@ async function download(url, options = {}) {
    * 변환된 buffer 크기를 resource size로 사용하면 안 된다.
    */
   const remoteSize = getHeaderSize(fetched.response);
-  const remoteEtag = getResponseEtag(fetched.response);
 
   let buffer;
 
@@ -534,7 +525,6 @@ async function download(url, options = {}) {
    *
    * filename = 원격 리소스의 원본 파일명
    * size     = 원격 GET 응답의 Content-Length
-   * etag     = 원격 서버가 제공한 ETag
    * path     = 실제 로컬 저장 위치
    *
    * size는 buffer.length나 fs.stat().size로 대체하지 않는다.
@@ -554,7 +544,6 @@ async function download(url, options = {}) {
   const resourceMetadata = {
     filename: originalFilename || resolvedFilename,
     size: remoteSize,
-    etag: remoteEtag || null,
   };
 
   /*
@@ -833,7 +822,7 @@ async function downloadNaverVideo(candidates, options = {}) {
    *
    *   HEAD
    *     ↓
-   *   filename + size + ETag
+   *   filename + size
    *     ↓
    *   resources cache
    *
@@ -866,12 +855,12 @@ async function downloadNaverVideo(candidates, options = {}) {
     cached: videoResult.cached,
     vid,
     metadata,
+    info,
     videoPath: videoResult.path,
     videoFilename: videoResult.filename,
     posterPath: "",
     posterFilename: "",
     posterUrl,
-    info,
   };
 }
 
