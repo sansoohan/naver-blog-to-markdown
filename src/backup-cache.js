@@ -394,12 +394,6 @@ function checkBackupCache() {
  * fs.stat(file).size와 비교하면 안 된다.
  *
  *
- * ETag:
- *
- * 양쪽 모두 존재하면 ETag까지 같아야 cache hit.
- * 한쪽이라도 없으면 filename + size만으로 판단한다.
- *
- *
  * 실패:
  *
  *   resourceErrors
@@ -504,10 +498,6 @@ function normalizeResourceSize(value) {
   return Number.isFinite(size) && size > 0 ? Math.trunc(size) : 0;
 }
 
-function normalizeEtag(value) {
-  return String(value || "").trim();
-}
-
 function normalizeResourceUrl(value) {
   return String(value || "").trim();
 }
@@ -602,7 +592,6 @@ function getResourceState(metadata) {
   const context = requireResourceContext();
   const filename = normalizeResourceFilename(metadata?.filename);
   const size = normalizeResourceSize(metadata?.size);
-  const etag = normalizeEtag(metadata?.etag);
   const key = makeResourceKey(filename, size);
 
   if (!key) return null;
@@ -620,10 +609,6 @@ function getResourceState(metadata) {
 
   if (!item || typeof item !== "object") return null;
   if (!item.path) return null;
-
-  const cachedEtag = normalizeEtag(item.etag);
-
-  if (etag && cachedEtag && etag !== cachedEtag) return null;
 
   const filePath = fromPostRelativePath(item.path);
 
@@ -645,7 +630,6 @@ function getResourceState(metadata) {
     storedPath: item.path,
     filename: item.filename || filename,
     size,
-    etag: cachedEtag,
     item,
   };
 }
@@ -662,7 +646,6 @@ function setResource(metadata, filePath) {
   const context = requireResourceContext();
   const filename = normalizeResourceFilename(metadata?.filename);
   const size = normalizeResourceSize(metadata?.size);
-  const etag = normalizeEtag(metadata?.etag);
   const key = makeResourceKey(filename, size);
 
   if (!key || !filePath) return;
@@ -677,7 +660,6 @@ function setResource(metadata, filePath) {
     entry.resources[key] = {
       filename,
       size,
-      etag: etag || null,
       path: storedPath,
     };
   });
@@ -696,7 +678,6 @@ function setResources(metadataList, filePath) {
     for (const metadata of metadataList) {
       const filename = normalizeResourceFilename(metadata?.filename);
       const size = normalizeResourceSize(metadata?.size);
-      const etag = normalizeEtag(metadata?.etag);
       const key = makeResourceKey(filename, size);
 
       if (!key) continue;
@@ -706,7 +687,6 @@ function setResources(metadataList, filePath) {
       entry.resources[key] = {
         filename,
         size,
-        etag: etag || null,
         path: storedPath,
       };
     }
