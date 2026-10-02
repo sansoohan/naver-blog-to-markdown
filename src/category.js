@@ -422,6 +422,7 @@ async function getAllPosts(blogId,categoryNo,options={}) {
       posts.push({
         logNo,
         title:decodeTitle(post.title||post.filteredEncodedTitle||""),
+        openType:post.openType,
       });
     }
 
