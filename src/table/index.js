@@ -7,54 +7,6 @@ const {
   ensureLegacyTableFontColor,
 } = require("./legacy");
 
-const LEGACY_TABLE_STYLE = `
-<style>
-table.naver-legacy-table {
-  width: 100% !important;
-}
-
-table.naver-legacy-table:not([style*="margin" i]),
-table.naver-legacy-table table:not([style*="margin" i]) {
-  margin: 0 !important;
-}
-
-table.naver-legacy-table:not([style*="padding" i]),
-table.naver-legacy-table table:not([style*="padding" i]) {
-  padding: 0 !important;
-}
-
-table.naver-legacy-table th:not([style*="margin" i]),
-table.naver-legacy-table td:not([style*="margin" i]) {
-  margin: 0 !important;
-}
-
-table.naver-legacy-table th:not([style*="padding" i]),
-table.naver-legacy-table td:not([style*="padding" i]) {
-  padding: 1px !important;
-}
-
-table.naver-legacy-table:not(.naver-legacy-table-transparent):not([style*="border" i]),
-table.naver-legacy-table:not(.naver-legacy-table-transparent) table:not([style*="border" i]) {
-  border: none !important;
-}
-
-table.naver-legacy-table:not(.naver-legacy-table-transparent) th:not([style*="border" i]),
-table.naver-legacy-table:not(.naver-legacy-table-transparent) td:not([style*="border" i]) {
-  border: none !important;
-}
-
-table.naver-legacy-table th,
-table.naver-legacy-table td {
-  vertical-align: middle;
-}
-
-table.naver-legacy-table p {
-  margin: 0 !important;
-  padding: 0 !important;
-}
-</style>
-`.trim();
-
 function protectTables($, root, store) {
   /*
    * SmartEditor 3/4 신형 표.
@@ -73,16 +25,20 @@ function protectTables($, root, store) {
   /*
    * SmartEditor 1/2 구형 표.
    */
-  let legacyTableStyleAdded = false;
-
-  root.find("table").each((_, element) => {
+  const legacyTables = root.find("table").filter((_, element) => {
     const table = $(element);
 
     /*
      * 실제 게시글 본문 안의 표만 처리한다.
      */
-    if (!table.closest(".post-view").length) return;
-    if (table.closest(".naver-protected").length) return;
+    if (!table.closest(".post-view").length) return false;
+    if (table.closest(".naver-protected").length) return false;
+
+    return true;
+  });
+
+  legacyTables.each((_, element) => {
+    const table = $(element);
 
     const cloned = table.clone();
 
@@ -127,18 +83,7 @@ function protectTables($, root, store) {
      *
      * 실제 텍스트가 들어 있는 구간은 건드리지 않는다.
      */
-    let output = $.html(cloned).replace(/\r?\n[ \t]*/g, "");
-
-    /*
-     * 구형 표용 CSS는 첫 번째 구형 표 앞에 한 번만 넣는다.
-     */
-    if (!legacyTableStyleAdded) {
-      output = `${LEGACY_TABLE_STYLE}
-
-${output}`;
-
-      legacyTableStyleAdded = true;
-    }
+    const output = $.html(cloned).replace(/\r?\n[ \t]*/g, "");
 
     table.replaceWith(`<div class="naver-protected">${store.add(output)}</div>`);
   });
