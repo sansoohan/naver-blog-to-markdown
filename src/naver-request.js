@@ -1,5 +1,9 @@
+const {
+  withConnectionRetry,
+} = require("./network");
+
 async function fetchPublic(url, options = {}) {
-  return fetch(url, options);
+  return withConnectionRetry(() => fetch(url, options));
 }
 
 function makeResponse({ ok, status, url, text }) {
@@ -15,44 +19,48 @@ async function fetchPrivateRequest(url, options = {}) {
   const { getAuthPage, forceLogin } = require("./auth");
 
   async function request() {
-    const page = await getAuthPage();
+    return withConnectionRetry(async () => {
+      const page = await getAuthPage();
 
-    return page.evaluate(async ({ url, method, headers, body }) => {
-      try {
-        const response = await fetch(url, {
-          method,
-          headers,
-          body,
-          credentials: "include",
-          redirect: "follow",
-        });
+      const result = await page.evaluate(async ({ url, method, headers, body }) => {
+        try {
+          const response = await fetch(url, {
+            method,
+            headers,
+            body,
+            credentials: "include",
+            redirect: "follow",
+          });
 
-        return {
-          ok: response.ok,
-          status: response.status,
-          url: response.url,
-          text: await response.text(),
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          status: 0,
-          url,
-          text: "",
-          error: error.message,
-        };
-      }
-    }, {
-      url,
-      method: options.method || "GET",
-      headers: options.headers || {},
-      body: options.body || null,
+          return {
+            ok: response.ok,
+            status: response.status,
+            url: response.url,
+            text: await response.text(),
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            status: 0,
+            url,
+            text: "",
+            error: error.message,
+          };
+        }
+      }, {
+        url,
+        method: options.method || "GET",
+        headers: options.headers || {},
+        body: options.body || null,
+      });
+
+      if (result.error) throw new Error(`네이버 요청 실패: ${result.error}`);
+
+      return result;
     });
   }
 
   let result = await request();
-
-  if (result.error) throw new Error(`네이버 요청 실패: ${result.error}`);
 
   if (isLoginResponse(result)) {
     console.log("");
@@ -64,7 +72,6 @@ async function fetchPrivateRequest(url, options = {}) {
 
     result = await request();
 
-    if (result.error) throw new Error(`네이버 요청 실패: ${result.error}`);
     if (isLoginResponse(result)) throw new Error("로그인 후에도 네이버 인증 요청에 실패했습니다.");
   }
 
@@ -89,24 +96,26 @@ async function fetchPrivatePage(url, options = {}) {
   const { getAuthPage, forceLogin } = require("./auth");
 
   async function load() {
-    const page = await getAuthPage();
+    return withConnectionRetry(async () => {
+      const page = await getAuthPage();
 
-    if (options.headers) await page.setExtraHTTPHeaders(options.headers);
+      if (options.headers) await page.setExtraHTTPHeaders(options.headers);
 
-    const response = await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
+      const response = await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+
+      if (!response) throw new Error(`페이지 요청 실패: ${url}`);
+
+      const html = await response.text();
+
+      return {
+        page,
+        response,
+        html,
+      };
     });
-
-    if (!response) throw new Error(`페이지 요청 실패: ${url}`);
-
-    const html = await response.text();
-
-    return {
-      page,
-      response,
-      html,
-    };
   }
 
   let result = await load();

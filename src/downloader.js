@@ -10,6 +10,11 @@ const {
   copyCachedFile,
 } = require("./backup-cache");
 
+const {
+  isNetworkError,
+  withConnectionRetry,
+} = require("./network");
+
 function normalizeUrl(url) {
   const source = String(url || "").trim().replace(/&amp;/g, "&");
   if (source.startsWith("//")) return `https:${source}`;
@@ -93,31 +98,6 @@ function getRequestSignal(options = {}) {
   if (options.signal) return options.signal;
   if (options.timeout > 0) return AbortSignal.timeout(options.timeout);
   return undefined;
-}
-
-function isNetworkError(error) {
-  if (!error) return false;
-
-  if (error.name === "AbortError" || error.name === "TimeoutError") {
-    return true;
-  }
-
-  if (error instanceof TypeError && error.message === "fetch failed") {
-    return true;
-  }
-
-  const code = error.code || error.cause?.code;
-
-  return [
-    "ECONNRESET",
-    "ECONNREFUSED",
-    "ENETDOWN",
-    "ENETUNREACH",
-    "EHOSTUNREACH",
-    "ETIMEDOUT",
-    "EAI_AGAIN",
-    "ENOTFOUND",
-  ].includes(code);
 }
 
 function getHeaderSize(response) {
@@ -252,26 +232,28 @@ async function fetchResourceMetadata(url, options = {}) {
     redirect = "follow",
   } = options;
 
-  const fetchOptions = {
-    method: "HEAD",
-    headers,
-    redirect,
-  };
+  return withConnectionRetry(async () => {
+    const fetchOptions = {
+      method: "HEAD",
+      headers,
+      redirect,
+    };
 
-  const signal = getRequestSignal(options);
+    const signal = getRequestSignal(options);
 
-  if (signal) fetchOptions.signal = signal;
+    if (signal) fetchOptions.signal = signal;
 
-  const response = await fetch(url, fetchOptions);
+    const response = await fetch(url, fetchOptions);
 
-  if (!response.ok) {
-    throw new Error(`HEAD HTTP ${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`HEAD HTTP ${response.status}`);
+    }
 
-  return {
-    response,
-    metadata: getResourceMetadata(url, response, options),
-  };
+    return {
+      response,
+      metadata: getResourceMetadata(url, response, options),
+    };
+  });
 }
 
 async function fetchResource(url, options = {}) {
@@ -280,31 +262,33 @@ async function fetchResource(url, options = {}) {
     redirect = "follow",
   } = options;
 
-  const fetchOptions = {
-    headers,
-    redirect,
-  };
+  return withConnectionRetry(async () => {
+    const fetchOptions = {
+      headers,
+      redirect,
+    };
 
-  const signal = getRequestSignal(options);
+    const signal = getRequestSignal(options);
 
-  if (signal) fetchOptions.signal = signal;
+    if (signal) fetchOptions.signal = signal;
 
-  const response = await fetch(url, fetchOptions);
+    const response = await fetch(url, fetchOptions);
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-  if (!buffer.length) {
-    throw new Error("빈 응답");
-  }
+    if (!buffer.length) {
+      throw new Error("빈 응답");
+    }
 
-  return {
-    buffer,
-    response,
-  };
+    return {
+      buffer,
+      response,
+    };
+  });
 }
 
 async function prepareBuffer(buffer, response, url, options = {}) {
@@ -464,6 +448,12 @@ async function download(url, options = {}) {
     }
   }
 
+  /*
+   * 병신같은 ChatGPT 이부분에서 기능누락 했으니 조심
+   *
+   * connection error는 resourceErrors에 절대 저장하지 않는다.
+   * 연결이 복구될 때까지 기다린 뒤 같은 요청을 다시 시도해야 한다.
+   */
   if (!fetched) {
     if (!isNetworkError(fetchError)) {
       setResourceError(source, fetchError);
@@ -620,6 +610,18 @@ async function downloadFirst(urls, options = {}) {
     try {
       return await download(url, options);
     } catch (error) {
+      /*
+       * 병신같은 ChatGPT 이부분에서 기능누락 했으니 조심
+       *
+       * connection error는 다음 후보 URL의 실패로 처리하지 않는다.
+       * 정상적인 connection error라면 download() 내부에서 연결이
+       * 복구될 때까지 기다리지만, 밖으로 전달되더라도 실패 목록에
+       * 넣어 일반적인 리소스 실패로 바꾸면 안 된다.
+       */
+      if (isNetworkError(error)) {
+        throw error;
+      }
+
       failures.push(`${url} -> ${error.message}`);
     }
   }
@@ -637,19 +639,21 @@ async function fetchNaverVideoInfo(vid, inKey) {
 
   const url = `https://apis.naver.com/rmcnmv/rmcnmv/vod/play/v2.0/${encodeURIComponent(vid)}?${params}`;
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Referer: "https://blog.naver.com/",
-      Accept: "application/json, text/plain, */*",
-    },
+  return withConnectionRetry(async () => {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Referer: "https://blog.naver.com/",
+        Accept: "application/json, text/plain, */*",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Naver VOD API 실패: HTTP ${response.status}`);
+    }
+
+    return response.json();
   });
-
-  if (!response.ok) {
-    throw new Error(`Naver VOD API 실패: HTTP ${response.status}`);
-  }
-
-  return response.json();
 }
 
 function findBestMp4(data) {
@@ -764,6 +768,10 @@ async function resolveNaverVideo(candidates) {
         posterUrl: findPoster(info) || normalizeUrl(metadata.thumbnail),
       };
     } catch (error) {
+      if (isNetworkError(error)) {
+        throw error;
+      }
+
       lastError = error;
     }
   }
