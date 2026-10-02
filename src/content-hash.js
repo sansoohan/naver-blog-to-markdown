@@ -202,6 +202,24 @@ function createContentHash(root) {
   clone.find("[splugin-id]").removeAttr("splugin-id");
 
   /*
+   * [해시 제외 - 구형 이미지 런타임 클래스]
+   *
+   * 구형 네이버 게시글의 이미지에는 페이지 렌더링 상태에 따라
+   * egjs-visible 클래스가 추가되거나 존재하지 않을 수 있다.
+   *
+   * 실제 확인된 차이:
+   *
+   *   _photoImage
+   *   _photoImage egjs-visible
+   *
+   * 게시글 내용과 관계없는 런타임 상태 클래스이므로 해시에서 제외한다.
+   *
+   * 중요:
+   * _photoImage 자체는 실제 이미지 요소를 식별하는 클래스이므로 유지한다.
+   */
+  clone.find(".egjs-visible").removeClass("egjs-visible");
+
+  /*
    * [해시 제외 - 첨부파일 다운로드 URL]
    *
    * 네이버 첨부파일의 .se-file-save-button href에는 같은 파일이어도 페이지를 다시 불러올 때
