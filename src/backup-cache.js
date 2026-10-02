@@ -428,7 +428,50 @@ function setResourceContext(cacheKey, outputDir, useCache = false) {
     cacheKey: key,
     outputDir: path.resolve(outputDir),
     useCache: Boolean(useCache),
+    usedResourceKeys: new Set(),
   };
+}
+
+function markResourceUsed(key) {
+  if (!activeContext || !key) return;
+
+  activeContext.usedResourceKeys.add(key);
+}
+
+function finalizeResources(resources) {
+  const context = requireResourceContext();
+  const usedResourceKeys = context.usedResourceKeys;
+  const result = {};
+
+  if (!resources || typeof resources !== "object") {
+    return result;
+  }
+
+  for (const [key, item] of Object.entries(resources)) {
+    if (usedResourceKeys.has(key)) {
+      result[key] = item;
+      continue;
+    }
+
+    if (!item || typeof item !== "object" || !item.path) continue;
+
+    const filePath = fromPostRelativePath(item.path);
+
+    if (!isExistingFile(filePath)) continue;
+
+    const usedByAnotherResource = Object.entries(resources).some(([otherKey, otherItem]) => {
+      if (!usedResourceKeys.has(otherKey)) return false;
+      if (!otherItem || typeof otherItem !== "object" || !otherItem.path) return false;
+
+      return normalizePath(fromPostRelativePath(otherItem.path)) === normalizePath(filePath);
+    });
+
+    if (!usedByAnotherResource) {
+      fs.rmSync(filePath, {force: true});
+    }
+  }
+
+  return result;
 }
 
 function clearResourceContext() {
@@ -593,6 +636,8 @@ function getResourceState(metadata) {
    */
   if (!isExistingFile(filePath)) return null;
 
+  markResourceUsed(key);
+
   return {
     key,
     status: "ok",
@@ -624,6 +669,8 @@ function setResource(metadata, filePath) {
 
   const storedPath = toPostRelativePath(filePath);
 
+  markResourceUsed(key);
+
   updateBackupCache(cache => {
     const entry = ensurePostCache(cache, context.cacheKey);
 
@@ -653,6 +700,8 @@ function setResources(metadataList, filePath) {
       const key = makeResourceKey(filename, size);
 
       if (!key) continue;
+
+      markResourceUsed(key);
 
       entry.resources[key] = {
         filename,
@@ -822,6 +871,7 @@ module.exports = {
   setResourceContext,
   clearResourceContext,
   getResourceContext,
+  finalizeResources,
 
   getResourceState,
   getResource,
