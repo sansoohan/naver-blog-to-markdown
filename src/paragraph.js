@@ -256,10 +256,19 @@ function escapeMarkdownText(text) {
 
 function renderMarkdownFormatting(text, style) {
   let result = escapeMarkdownText(text);
+  const hasEdgeSpace = /^\s|\s$/.test(text);
 
-  if (style.strike) result = `~~${result}~~`;
-  if (style.italic) result = `*${result}*`;
-  if (style.bold) result = `**${result}**`;
+  if (style.strike) {
+    result = hasEdgeSpace ? `<s>${result}</s>` : `~~${result}~~`;
+  }
+
+  if (style.italic) {
+    result = hasEdgeSpace ? `<em>${result}</em>` : `*${result}*`;
+  }
+
+  if (style.bold) {
+    result = hasEdgeSpace ? `<strong>${result}</strong>` : `**${result}**`;
+  }
 
   return result;
 }
