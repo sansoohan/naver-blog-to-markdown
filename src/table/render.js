@@ -1,6 +1,54 @@
 const { renderParagraph, renderParagraphHtml, escapeHtmlText } = require("../paragraph");
 const { getCellBackgroundColor, shouldMakeTableTransparent } = require("./legacy");
 
+const LEGACY_TABLE_STYLE = `
+<style>
+table.naver-legacy-table {
+  width: 100% !important;
+}
+
+table.naver-legacy-table:not([style*="margin" i]),
+table.naver-legacy-table table:not([style*="margin" i]) {
+  margin: 0 !important;
+}
+
+table.naver-legacy-table:not([style*="padding" i]),
+table.naver-legacy-table table:not([style*="padding" i]) {
+  padding: 0 !important;
+}
+
+table.naver-legacy-table th:not([style*="margin" i]),
+table.naver-legacy-table td:not([style*="margin" i]) {
+  margin: 0 !important;
+}
+
+table.naver-legacy-table th:not([style*="padding" i]),
+table.naver-legacy-table td:not([style*="padding" i]) {
+  padding: 1px !important;
+}
+
+table.naver-legacy-table:not(.naver-legacy-table-transparent):not([style*="border" i]),
+table.naver-legacy-table:not(.naver-legacy-table-transparent) table:not([style*="border" i]) {
+  border: none !important;
+}
+
+table.naver-legacy-table:not(.naver-legacy-table-transparent) th:not([style*="border" i]),
+table.naver-legacy-table:not(.naver-legacy-table-transparent) td:not([style*="border" i]) {
+  border: none !important;
+}
+
+table.naver-legacy-table th,
+table.naver-legacy-table td {
+  vertical-align: middle;
+}
+
+table.naver-legacy-table p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+</style>
+`.trim();
+
 function getSpan(cell, name) {
   const value = Number(cell.attr(name) || 1);
   return Number.isFinite(value) && value > 0 ? value : 1;
@@ -326,4 +374,15 @@ function renderComplexTable($, table) {
   return html;
 }
 
-module.exports = { isSimpleTable, renderSimpleTable, renderComplexTable };
+function getLegacyTableCss(markdown) {
+  if (!String(markdown).includes("naver-legacy-table")) return "";
+
+  return LEGACY_TABLE_STYLE;
+}
+
+module.exports = {
+  isSimpleTable,
+  renderSimpleTable,
+  renderComplexTable,
+  getLegacyTableCss,
+};

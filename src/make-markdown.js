@@ -3,6 +3,7 @@ const TurndownService = require("turndown");
 
 const { protectTextComponents } = require("./paragraph");
 const { protectTables } = require("./table");
+const { getLegacyTableCss } = require("./table/render");
 const { protectQuotes } = require("./quote");
 const { protectHorizontalLines, getHorizontalLineCss } = require("./horizontal-line");
 const { protectCodeBlocks } = require("./code");
@@ -625,8 +626,9 @@ function makeMarkdown(originalHtml, options = {}) {
   markdown = cleanMarkdown(markdown);
 
   const horizontalLineCss = getHorizontalLineCss(horizontalLineTypes);
+  const legacyTableCss = getLegacyTableCss(markdown);
 
-  return `${horizontalLineCss ? `${horizontalLineCss}\n\n` : ""}${markdown}\n`;
+  return `${horizontalLineCss ? `${horizontalLineCss}\n\n` : ""}${legacyTableCss ? `${legacyTableCss}\n\n` : ""}${markdown}\n`;
 }
 
 module.exports = {
