@@ -38,7 +38,7 @@ function Workspace({posts, postId}: WorkspaceProps) {
   }, [posts]);
 
   const categoryPosts = useMemo(() => {
-    if (!currentPost) return posts;
+    if (!currentPost) return [];
     return posts.filter(post => post.category === currentPost.category);
   }, [posts, currentPost]);
 
