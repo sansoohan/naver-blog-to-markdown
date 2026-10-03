@@ -13,11 +13,16 @@ function isNetworkError(error) {
     return true;
   }
 
+  /*
+   * Chromium / 브라우저 네트워크 오류는 error.code가 아니라
+   * Playwright가 전달하는 error.message 안에 오류 이름이 들어간다.
+   */
   const message = String(error.message || error);
 
   if (
     message.includes("ERR_INTERNET_DISCONNECTED")
     || message.includes("ERR_NETWORK_CHANGED")
+    || message.includes("ERR_NETWORK_IO_SUSPENDED")
     || message.includes("ERR_CONNECTION_RESET")
     || message.includes("ERR_CONNECTION_REFUSED")
     || message.includes("ERR_CONNECTION_TIMED_OUT")
@@ -28,6 +33,10 @@ function isNetworkError(error) {
     return true;
   }
 
+  /*
+   * Node.js / OS 네트워크 오류는 error.code 또는
+   * error.cause.code에 시스템 오류 코드가 들어간다.
+   */
   const code = error.code || error.cause?.code;
 
   return [
@@ -56,42 +65,34 @@ async function isInternetDisconnected() {
 }
 
 async function withConnectionRetry(request) {
+  let disconnected = false;
+
   while (true) {
     try {
-      return await request();
+      const result = await request();
+
+      if (disconnected) {
+        console.error("인터넷 연결이 복구되었습니다.");
+        console.error("");
+      }
+
+      return result;
     } catch (error) {
       if (!isNetworkError(error)) throw error;
 
-      const disconnected = await isInternetDisconnected();
-
-      if (!disconnected) {
+      if (!await isInternetDisconnected()) {
+        await sleep(5000);
         throw error;
       }
 
-      console.error("");
-      console.error("인터넷 연결이 끊어졌습니다.");
-      console.error("연결이 복구될 때까지 기다립니다.");
-
-      while (true) {
-        await sleep(5000);
-
-        if (await isInternetDisconnected()) continue;
-
-        try {
-          const result = await request();
-
-          console.error("인터넷 연결이 복구되었습니다.");
-          console.error("");
-
-          return result;
-        } catch (retryError) {
-          if (!isNetworkError(retryError)) throw retryError;
-
-          if (!await isInternetDisconnected()) {
-            throw retryError;
-          }
-        }
+      if (!disconnected) {
+        console.error("");
+        console.error("인터넷 연결이 끊어졌습니다.");
+        console.error("연결이 복구될 때까지 기다립니다.");
+        disconnected = true;
       }
+
+      await sleep(5000);
     }
   }
 }

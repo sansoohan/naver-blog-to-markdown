@@ -773,10 +773,22 @@ async function resolveNaverVideo(candidates) {
 }
 
 async function downloadNaverVideo(candidates, options = {}) {
+  const defaultOptions = {
+    outputDir: "",
+    fallbackFilename: "video.mp4",
+    timeout: 10000,
+  };
+
+  const requestOptions = {
+    ...defaultOptions,
+    ...options,
+  };
+
   const {
-    outputDir = "",
-    fallbackFilename = "video.mp4",
-  } = options;
+    outputDir,
+    fallbackFilename,
+    timeout,
+  } = requestOptions;
 
   if (!Array.isArray(candidates) || !candidates.length) {
     throw new Error("Naver 동영상 메타데이터가 없습니다.");
@@ -832,6 +844,7 @@ async function downloadNaverVideo(candidates, options = {}) {
     outputDir,
     fallbackFilename: fallback,
     logLabel: "동영상",
+    timeout,
     headers: {
       "User-Agent": "Mozilla/5.0",
       Referer: "https://blog.naver.com/",
