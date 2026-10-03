@@ -98,37 +98,81 @@ function markResourceUsed(key) {
   activeContext.usedResourceKeys.add(key);
 }
 
-function finalizeResources(resources) {
-  const context = requireResourceContext();
-  const usedResourceKeys = context.usedResourceKeys;
-  const result = {};
+function normalizeHtmlResourcePath(value) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "");
+}
 
-  if (!resources || typeof resources !== "object") {
-    return result;
+function isResourceReferenced(html, storedPath) {
+  const resourcePath = normalizeHtmlResourcePath(storedPath);
+
+  if (!resourcePath) return false;
+
+  const filename = path.posix.basename(resourcePath);
+
+  return (
+    html.includes(resourcePath)
+    || html.includes(`./${resourcePath}`)
+    || html.includes(filename)
+  );
+}
+
+function finalizeResources(resources, html) {
+  const context = requireResourceContext();
+  const result = {};
+  const usedPaths = new Set();
+
+  if (resources && typeof resources === "object") {
+    for (const [key, item] of Object.entries(resources)) {
+      if (!item || typeof item !== "object" || !item.path) continue;
+      if (!isResourceReferenced(html, item.path)) continue;
+
+      const filePath = fromPostRelativePath(item.path);
+
+      if (!isExistingFile(filePath)) continue;
+
+      result[key] = item;
+      usedPaths.add(normalizePath(filePath));
+    }
   }
 
-  for (const [key, item] of Object.entries(resources)) {
-    if (usedResourceKeys.has(key)) {
-      result[key] = item;
-      continue;
-    }
+  /*
+   * --cache / --update에서는 기존 게시글 폴더를 temp로 복사하므로
+   * resources에 더 이상 존재하지 않는 과거 파일도 남아 있을 수 있다.
+   *
+   * makeHtml()이 완료된 HTML에는 현재 사용하는 로컬 파일명이
+   * 모두 반영되어 있으므로 HTML을 기준으로 실제 파일도 정리한다.
+   */
+  const entries = fs.readdirSync(context.outputDir, {withFileTypes: true});
 
-    if (!item || typeof item !== "object" || !item.path) continue;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
 
-    const filePath = fromPostRelativePath(item.path);
+    const filename = entry.name;
 
-    if (!isExistingFile(filePath)) continue;
+    /*
+     * 게시글 자체의 생성 파일은 resource가 아니다.
+     */
+    if (filename === "original.html") continue;
+    if (filename === "index.md") continue;
+    if (filename === "metadata.json") continue;
+    if (/^\.hash-source-.*\.html$/i.test(filename)) continue;
 
-    const usedByAnotherResource = Object.entries(resources).some(([otherKey, otherItem]) => {
-      if (!usedResourceKeys.has(otherKey)) return false;
-      if (!otherItem || typeof otherItem !== "object" || !otherItem.path) return false;
+    const filePath = path.join(context.outputDir, filename);
 
-      return normalizePath(fromPostRelativePath(otherItem.path)) === normalizePath(filePath);
-    });
+    /*
+     * 현재 resources에서 사용하는 파일.
+     */
+    if (usedPaths.has(normalizePath(filePath))) continue;
 
-    if (!usedByAnotherResource) {
-      fs.rmSync(filePath, {force: true});
-    }
+    /*
+     * resources cache에는 없어도 현재 HTML에서 직접 참조하고 있다면
+     * 현재 게시글에 필요한 파일이므로 보존한다.
+     */
+    if (isResourceReferenced(html, filename)) continue;
+
+    fs.rmSync(filePath, {force: true});
   }
 
   return result;
