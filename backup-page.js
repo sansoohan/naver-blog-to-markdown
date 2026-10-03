@@ -311,6 +311,7 @@ async function convertPost(blogId, logNo, options = {}) {
     openType: suppliedOpenType = null,
     includePrivate = false,
     categoryUpdated = false,
+    existingBackup = false,
     update = false,
     useCache = false,
     outputDir = "",
@@ -386,7 +387,7 @@ async function convertPost(blogId, logNo, options = {}) {
   const filesExist = backupExists(finalOutputDir);
 
   if (skipUnchanged && previous && previous.hash === contentHash && sameOutputPath && filesExist) {
-    console.log(`변경 없음: ${title}`);
+    console.log(`변경없음: ${title}`);
 
     return {
       status: "skipped",
@@ -571,10 +572,10 @@ async function convertPost(blogId, logNo, options = {}) {
       releaseBackupLock(lock);
     }
 
-    console.log(`완료: ${relativePath}`);
+    console.log(`${existingBackup ? "업데이트" : "완료"}: ${relativePath}`);
 
     return {
-      status: previous ? "updated" : "new",
+      status: existingBackup ? "updated" : "new",
       blogId,
       logNo,
       title,
