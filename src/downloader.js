@@ -74,7 +74,7 @@ function getUniqueFilename(outputDir, filename) {
   let index = 2;
 
   while (fs.existsSync(path.join(outputDir, result))) {
-    result = `${base}_${index}${ext}`;
+    result = `${base}.__dup${index}__${ext}`;
     index++;
   }
 
