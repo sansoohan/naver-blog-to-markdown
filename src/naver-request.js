@@ -1,6 +1,14 @@
 const {
   withConnectionRetry,
 } = require("./network");
+const { chromium } = require("playwright");
+
+let crawlBrowser = null;
+let crawlContext = null;
+let crawlPage = null;
+let crawlPageUseCount = 0;
+
+const CRAWL_PAGE_MAX_USES = 100;
 
 async function fetchPublic(url, options = {}) {
   return withConnectionRetry(() => fetch(url, options));
@@ -92,12 +100,69 @@ function isLoginResponse(result) {
   return false;
 }
 
+async function syncCrawlCookies() {
+  const { getAuthContext } = require("./auth");
+
+  const authContext = await getAuthContext();
+  const cookies = await authContext.cookies();
+
+  if (cookies.length) {
+    await crawlContext.addCookies(cookies);
+  }
+}
+
+async function ensureCrawlContext() {
+  if (crawlBrowser && crawlContext) return;
+
+  crawlBrowser = await chromium.launch({
+    headless: true,
+  });
+
+  crawlContext = await crawlBrowser.newContext();
+
+  await syncCrawlCookies();
+}
+
+async function closeCrawlPage() {
+  if (crawlPage && !crawlPage.isClosed()) {
+    await crawlPage.close().catch(() => {});
+  }
+
+  crawlPage = null;
+  crawlPageUseCount = 0;
+}
+
+async function getCrawlPage() {
+  await ensureCrawlContext();
+
+  if (
+    !crawlPage
+    || crawlPage.isClosed()
+    || crawlPageUseCount >= CRAWL_PAGE_MAX_USES
+  ) {
+    await closeCrawlPage();
+
+    crawlPage = await crawlContext.newPage();
+    crawlPageUseCount = 0;
+  }
+
+  crawlPageUseCount++;
+
+  return crawlPage;
+}
+
+async function resetCrawlAuth() {
+  await closeCrawlPage();
+  await ensureCrawlContext();
+  await syncCrawlCookies();
+}
+
 async function fetchPrivatePage(url, options = {}) {
-  const { getAuthPage, forceLogin } = require("./auth");
+  const { forceLogin } = require("./auth");
 
   async function load() {
     return withConnectionRetry(async () => {
-      const page = await getAuthPage();
+      const page = await getCrawlPage();
 
       if (options.headers) await page.setExtraHTTPHeaders(options.headers);
 
@@ -108,11 +173,10 @@ async function fetchPrivatePage(url, options = {}) {
 
       if (!response) throw new Error(`페이지 요청 실패: ${url}`);
 
-      const html = await response.text();
+      const html = await page.content();
 
       return {
         page,
-        response,
         html,
       };
     });
@@ -128,19 +192,19 @@ async function fetchPrivatePage(url, options = {}) {
 
     await forceLogin();
 
+    await resetCrawlAuth();
+
     result = await load();
 
     if (isPrivatePageDenied(result.page, result.html)) {
-      throw new Error("로그인 후에도 비공개 게시글에 접근할 수 없습니다.");
+      throw new Error("네이버 로그인 후에도 비공개 게시글에 접근할 수 없습니다.");
     }
   }
 
-  const status = result.response.status();
-
   return makeResponse({
-    ok: status >= 200 && status < 400,
-    status,
-    url: result.response.url(),
+    ok: true,
+    status: 200,
+    url,
     text: result.html,
   });
 }
