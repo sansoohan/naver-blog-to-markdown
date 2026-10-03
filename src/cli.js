@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const {closeNaverRequest} = require("./naver-request");
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -170,6 +171,8 @@ async function runCli(options) {
 
     process.removeListener("SIGINT", handleSigint);
     process.removeListener("SIGTERM", handleSigterm);
+
+    await closeNaverRequest();
 
     if (includePrivate) {
       const {closeAuth} = require("./auth");

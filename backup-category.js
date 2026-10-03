@@ -123,7 +123,7 @@ async function backupPosts(blogId, posts, options = {}) {
 
     if (!update && !useCache && cached) {
       skipped++;
-      console.log(`이미 백업됨: ${post.logNo}\n`);
+      console.log(`변경없음: ${post.logNo} ${post.title}\n`);
       continue;
     }
 
@@ -138,25 +138,23 @@ async function backupPosts(blogId, posts, options = {}) {
         openType: post.openType,
         includePrivate,
         categoryUpdated: true,
+        existingBackup: cached,
         update,
         useCache,
         outputDir,
       });
 
-      if (result.status === "new") {
-        created++;
-      } else if (result.status === "updated") {
+      if (result.status === "skipped") {
+        skipped++;
+      } else if (cached) {
         updated++;
         updatedPosts.push(post);
-        console.log(`업데이트됨: ${post.logNo} ${post.title}`);
-      } else if (result.status === "skipped") {
-        skipped++;
+      } else {
+        created++;
       }
 
       cachedPostKeys.add(cacheKey);
       cachedPostKeys.delete(legacyKey);
-
-      backupMonitor.completePost();
     } catch (error) {
       failed++;
 
@@ -188,40 +186,34 @@ async function backupPosts(blogId, posts, options = {}) {
   return result;
 }
 
-function printBackupSummary(label, result, options = {}) {
-  const {update = false, useCache = false} = options;
-
-  console.log(`${label} 백업 완료`);
-  console.log(`전체: ${result.total}`);
-  console.log(`신규: ${result.created}`);
-  console.log(`업데이트: ${result.updated}`);
-
-  if (update) {
-    console.log(`변경 없음: ${result.skipped}`);
-  } else if (useCache) {
-    console.log(`건너뜀: ${result.skipped}`);
-  } else {
-    console.log(`이미 백업됨: ${result.skipped}`);
-  }
-
-  console.log(`실패: ${result.failed}`);
-
+function printBackupSummary(label, result) {
   if (result.updatedPosts.length) {
-    console.log("\n업데이트된 글:");
+    console.log("업데이트된 글:");
 
     for (const post of result.updatedPosts) {
       console.log(`${post.logNo} ${post.title}`);
     }
+
+    console.log("");
   }
 
   if (result.failedPosts.length) {
-    console.log("\n실패한 글:");
+    console.log("실패한 글:");
 
     for (const post of result.failedPosts) {
       console.log(`${post.logNo} ${post.title || ""}`);
       console.log(`  ${post.error}`);
     }
+
+    console.log("");
   }
+
+  console.log(`${label} 백업 완료`);
+  console.log(`전체: ${result.total}`);
+  console.log(`신규: ${result.created}`);
+  console.log(`업데이트: ${result.updated}`);
+  console.log(`변경없음: ${result.skipped}`);
+  console.log(`실패: ${result.failed}`);
 }
 
 async function backupAllCategories(url, options = {}) {
@@ -257,7 +249,7 @@ async function backupAllCategories(url, options = {}) {
     outputDir,
   });
 
-  printBackupSummary("블로그", result, {update, useCache});
+  printBackupSummary("블로그", result);
 
   return result;
 }
@@ -291,7 +283,7 @@ async function backupCategory(url, categoryName = "", options = {}) {
     outputDir,
   });
 
-  printBackupSummary("카테고리", result, {update, useCache});
+  printBackupSummary("카테고리", result);
 
   return result;
 }

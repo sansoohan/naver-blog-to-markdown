@@ -132,6 +132,20 @@ async function closeCrawlPage() {
   crawlPageUseCount = 0;
 }
 
+async function closeNaverRequest() {
+  await closeCrawlPage();
+
+  if (crawlContext) {
+    await crawlContext.close().catch(() => {});
+    crawlContext = null;
+  }
+
+  if (crawlBrowser) {
+    await crawlBrowser.close().catch(() => {});
+    crawlBrowser = null;
+  }
+}
+
 async function getCrawlPage() {
   await ensureCrawlContext();
 
@@ -235,4 +249,5 @@ async function fetchNaver(url, options = {}) {
 
 module.exports = {
   fetchNaver,
+  closeNaverRequest,
 };
