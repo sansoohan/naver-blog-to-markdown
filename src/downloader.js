@@ -8,7 +8,7 @@ const {
   setResourceError,
   clearResourceError,
   copyCachedFile,
-} = require("./backup-cache");
+} = require("./cache-resource");
 
 const {
   isNetworkError,

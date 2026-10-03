@@ -168,14 +168,13 @@ async function downloadCss(info, outputDir, label) {
   if (!info) return "";
 
   const url = normalizeUrl(info.url);
-  console.log(`${label} CSS 다운로드 시작: ${url}`);
 
   try {
     const result = await download(url, {
       outputDir,
       filename: info.filename,
       overwrite: true,
-      logLabel: `${label} CSS 다운로드 완료`,
+      logLabel: `${label} CSS`,
       headers: {"User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/"},
       transform: buffer => rewriteCssUrls(buffer.toString("utf8"), url),
     });
