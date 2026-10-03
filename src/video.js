@@ -330,6 +330,7 @@ async function localizeNaverVideos($, root, imageManager, options = {}) {
         result = await downloadNaverVideo(candidates, {
           outputDir: imageManager.outputDir,
           fallbackFilename: `video-${String(components.indexOf(element) + 1).padStart(3, "0")}.mp4`,
+          timeout: 60000,
         });
       } catch (error) {
         console.warn(`동영상 다운로드 실패: ${candidates[0]?.vid || "unknown"}`);
