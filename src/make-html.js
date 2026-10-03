@@ -168,14 +168,14 @@ async function downloadCss(info, outputDir, label) {
   if (!info) return "";
 
   const url = normalizeUrl(info.url);
-  console.log(`${label} CSS: ${url}`);
+  console.log(`${label} CSS 다운로드 시작: ${url}`);
 
   try {
     const result = await download(url, {
       outputDir,
       filename: info.filename,
       overwrite: true,
-      logLabel: `${label} CSS`,
+      logLabel: `${label} CSS 다운로드 완료`,
       headers: {"User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/"},
       transform: buffer => rewriteCssUrls(buffer.toString("utf8"), url),
     });
@@ -450,8 +450,6 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   }
 
   const imageManager = createImageManager(outputDir);
-
-  console.log(`에디터 버전: ${editorVersion || "알 수 없음"}`);
 
   const wrappers = prepareWrapperPath(root, editorVersion);
   const layoutCssFilename = await downloadLayoutCss($, outputDir);
