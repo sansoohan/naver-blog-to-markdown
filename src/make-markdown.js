@@ -503,15 +503,21 @@ function isForeignFormattedBlock($, element) {
 function protectLegacyPastedHtml($, root, store, editorVersion) {
   if (editorVersion !== 1 && editorVersion !== 2) return;
 
-  const content = root.find("#postViewArea .post-view,.se3_view,.post-view > .view,.post-view,.view").first();
+  let content = root.find("#postViewArea .post-view > .view,.post-view > .view,.se3_view,.view").first();
+
+  if (!content.length) {
+    content = root.find("#postViewArea .post-view,.post-view").first();
+  }
+
   if (!content.length) return;
 
   /*
-   * SmartEditor 1/2의 기본 본문은 일반 <p> 중심 구조다.
-   * 이미지, 표, 영상, 첨부파일 등 네이버 고유 요소는 앞 단계에서 이미 보호된다.
+   * SmartEditor 1/2의 기본 본문에는 의미 없는 <div> 래퍼가 들어갈 수 있다.
+   * 이런 래퍼는 몇 겹이든 보호하지 않고 내부의 일반 <p>가
+   * 문단 변환 단계까지 전달되도록 한다.
    *
-   * 그 뒤에도 본문 바로 아래에 남아 있는 별도 HTML 블록은
-   * 구버전에서 직접 붙여 넣은 HTML로 보고 원본 그대로 보존한다.
+   * 별도의 속성이나 서식이 있는 블록만 직접 붙여 넣은 HTML로 보고
+   * 원본 그대로 보존한다.
    */
   const blocks = content.children("div,section,article,aside").toArray();
 
@@ -521,6 +527,11 @@ function protectLegacyPastedHtml($, root, store, editorVersion) {
     if (!node.parent().length) continue;
     if (node.hasClass("naver-protected")) continue;
     if (node.hasClass("autosourcing-stub-saved")) continue;
+
+    const attributes = element.attribs || {};
+    const attributeNames = Object.keys(attributes);
+
+    if (!attributeNames.length) continue;
 
     const html = $.html(element);
     node.replaceWith(`<div class="naver-protected">${store.add(html)}</div>`);
