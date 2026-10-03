@@ -6,7 +6,7 @@ const {
   saveBackupCacheUnlocked,
   acquireBackupLock,
   releaseBackupLock,
-} = require("../backup-cache");
+} = require("../cache-html");
 const {getCategoryPathParts} = require("./category");
 
 function safeFilename(value) {

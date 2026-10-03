@@ -519,7 +519,7 @@ async function convertPost(blogId, logNo, options = {}) {
         ? currentEntry.resources
         : {};
 
-      const resources = finalizeResources(currentResources);
+      const resources = finalizeResources(currentResources, originalHtml);
 
       const resourceErrors = currentEntry.resourceErrors && typeof currentEntry.resourceErrors === "object"
         ? currentEntry.resourceErrors
