@@ -21,6 +21,31 @@ function getStyleProperty(style, property) {
   return match ? match[1].trim() : "";
 }
 
+function getParagraphAlignment(node) {
+  if (!node || node.type !== "tag") return "";
+
+  const className = node.attribs?.class || "";
+  const style = node.attribs?.style || "";
+  const align = String(node.attribs?.align || "").trim().toLowerCase();
+
+  /*
+   * SmartEditor 3.x 이상
+   */
+  const classMatch = className.match(/(?:^|\s)se-text-paragraph-align-(left|center|right|justify)(?:\s|$)/);
+
+  if (classMatch) return classMatch[1];
+
+  /*
+   * SmartEditor 1.x / 2.x
+   */
+  const styleAlign = getStyleProperty(style, "text-align").toLowerCase();
+
+  if (/^(?:left|center|right|justify)$/.test(styleAlign)) return styleAlign;
+  if (/^(?:left|center|right|justify)$/.test(align)) return align;
+
+  return "";
+}
+
 function getNaverFontSize(node) {
   if (!node || node.type !== "tag") return null;
 
@@ -468,11 +493,23 @@ function renderParagraph(node) {
     return { empty: true, text: "" };
   }
 
+  const alignment = getParagraphAlignment(node);
   const paragraphSize = getParagraphFontSize(runs);
   const mixed = hasMixedFontSizes(runs);
   const checkbox = parseCheckbox(runs);
   const listItem = !checkbox ? parseListItem(runs) : null;
   const heading = !checkbox && !listItem && !mixed ? getHeadingLevel(paragraphSize) : 0;
+
+  /*
+   * Markdown에는 문단 정렬 문법이 없으므로
+   * 정렬이 지정된 문단은 전체 문단을 HTML <p>로 보존한다.
+   *
+   * left는 Markdown 기본 정렬과 같으므로 별도로 보존하지 않는다.
+   */
+  if (alignment && alignment !== "left") {
+    const content = renderParagraphHtml(node);
+    return { empty: false, text: `<p style="text-align:${alignment}">${content}</p>` };
+  }
 
   if (checkbox) runs = removeTextPrefix(runs, checkbox.length);
   if (listItem) runs = removeTextPrefix(runs, listItem.length);
