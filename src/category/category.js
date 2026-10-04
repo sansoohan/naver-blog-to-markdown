@@ -1,3 +1,4 @@
+// category/category.js
 const CategoryVisibility = {
   PUBLIC: "public",
   PRIVATE: "private",

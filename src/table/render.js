@@ -1,3 +1,4 @@
+// table/render.js
 const { renderParagraph, renderParagraphHtml, escapeHtmlText } = require("../paragraph");
 const { getCellBackgroundColor, shouldMakeTableTransparent } = require("./legacy");
 

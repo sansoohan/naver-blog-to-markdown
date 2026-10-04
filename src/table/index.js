@@ -1,3 +1,4 @@
+// table/render.js
 const { isSimpleTable, renderSimpleTable, renderComplexTable } = require("./render");
 const {
   shouldMakeTableTransparent,

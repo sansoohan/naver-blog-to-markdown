@@ -432,7 +432,6 @@ function protectOgCards($, root, store) {
 
     const textHtml =
       `<div style="padding:14px 16px;box-sizing:border-box;color:#222;">${text}</div>`;
-
     let imageHtml = "";
 
     if (imageSrc) {
@@ -503,7 +502,17 @@ function isForeignFormattedBlock($, element) {
 function protectLegacyPastedHtml($, root, store, editorVersion) {
   if (editorVersion !== 1 && editorVersion !== 2) return;
 
-  let content = root.find("#postViewArea .post-view > .view,.post-view > .view,.se3_view,.view").first();
+  /*
+   * SmartEditor 1/2의 실제 본문 .view를 우선한다.
+   *
+   * .view 자체에 font-size / font-family 같은 기본 스타일이 있어도
+   * 이것은 붙여 넣은 HTML이 아니라 네이버의 기본 본문 래퍼다.
+   */
+  let content = root.find("#postViewArea .view").first();
+
+  if (!content.length) {
+    content = root.find(".post-view > .view,.se3_view,.view").first();
+  }
 
   if (!content.length) {
     content = root.find("#postViewArea .post-view,.post-view").first();
@@ -617,7 +626,7 @@ function makeMarkdown(originalHtml, options = {}) {
    */
   protectForeignFormattedBlocks($, root, store);
 
-  protectTextComponents($, root, store);
+  protectTextComponents($, root, store, editorVersion);
   protectStandaloneImages($, root, store);
 
   const turndown = createTurndown();

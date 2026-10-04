@@ -1,3 +1,4 @@
+// table/legacy.js
 function getSpan(cell, name) {
   const value = Number(cell.attr(name) || 1);
   return Number.isFinite(value) && value > 0 ? value : 1;
