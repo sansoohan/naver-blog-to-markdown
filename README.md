@@ -53,18 +53,20 @@ npm run blog -- "https://blog.naver.com/[네이버ID]" --cache                  
 
 ```text
 output/
-├── backup-cache.json                 # 전체·카테고리 백업의 변경 여부 기록(도중에 이어서 백업)
-└── 상위 카테고리/
-    └── 하위 카테고리/
-        └── 123456789_게시글 제목/
-            ├── index.md              # 변환된 Markdown
-            ├── original.html         # 로컬 미디어 경로로 정리된 원본 HTML
-            ├── PostView.css          # SmartEditor 1.x·2.x용 CSS
-            ├── se.viewer.desktop.css # SmartEditor 3.x 이상용 CSS
-            ├── image.png             # 글의 로컬 이미지
-            ├── video.mp4             # 글의 로컬 동영상
-            └── download/             # 첨부파일
-                └── 자료.zip
+└── [네이버ID]/
+    ├── backup-cache.json                 # 해당 블로그의 변경 여부 기록(도중에 이어서 백업)
+    ├── categories.json                   # 해당 블로그의 카테고리 정보
+    └── 상위 카테고리/
+        └── 하위 카테고리/
+            └── 123456789_게시글 제목/
+                ├── index.md              # 변환된 Markdown
+                ├── original.html         # 로컬 미디어 경로로 정리된 원본 HTML
+                ├── PostView.css          # SmartEditor 1.x·2.x용 CSS
+                ├── se.viewer.desktop.css # SmartEditor 3.x 이상용 CSS
+                ├── image.png             # 글의 로컬 이미지
+                ├── video.mp4             # 글의 로컬 동영상
+                └── download/             # 첨부파일
+                    └── 자료.zip
 ```
 
 ### 출력 폴더 변경
@@ -152,11 +154,11 @@ npm run test
 
 클라이언트와 서버가 함께 실행됩니다. 터미널에 표시된 주소(기본 `http://localhost:5173`)를 브라우저에서 엽니다.
 
-`output/` 폴더에 백업된 게시글이 있어야 목록에 표시됩니다.
+`output` 폴더에 백업된 게시글이 있어야 목록에 표시됩니다.
 
 ### 백업 결과 폴더 변경
 
-`--output` 옵션을 사용하면 백업 결과 폴더를 직접 지정할 수 있습니다. 상대 경로와 절대 경로를 모두 사용할 수 있으며, 지정하지 않으면 기본 output/ 폴더를 읽어들입니다.
+`--output` 옵션을 사용하면 백업 결과 폴더를 직접 지정할 수 있습니다. 상대 경로와 절대 경로를 모두 사용할 수 있으며, 지정하지 않으면 기본 `output` 폴더를 읽어들입니다.
 
 ```
 npm run test -- --output "./backup"
