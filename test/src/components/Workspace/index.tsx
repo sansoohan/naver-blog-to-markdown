@@ -58,8 +58,8 @@ function Workspace({posts, postId, blogIds, blogId, setBlogId}: WorkspaceProps) 
     goToPost(posts[currentIndex + 1]);
   };
 
-  const selectPost = (id: string) => {
-    const post = posts.find(post => post.id === id);
+  const selectPost = (postId: string) => {
+    const post = posts.find(post => post.postId === postId);
 
     if (post) {
       goToPost(post);

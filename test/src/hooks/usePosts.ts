@@ -3,12 +3,14 @@ import type {PostInfo} from "~/types/post";
 
 export function usePosts(blogId?: string) {
   const [posts, setPosts] = useState<PostInfo[]>([]);
+  const [loadedBlogId, setLoadedBlogId] = useState("");
   const [loading, setLoading] = useState(Boolean(blogId));
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!blogId) {
       setPosts([]);
+      setLoadedBlogId("");
       setLoading(false);
       setError("");
       return;
@@ -32,11 +34,13 @@ export function usePosts(blogId?: string) {
         if (cancelled) return;
 
         setPosts(data);
+        setLoadedBlogId(blogId!);
       } catch (error) {
         if (cancelled) return;
 
         console.error(error);
         setPosts([]);
+        setLoadedBlogId(blogId!);
         setError(error instanceof Error ? error.message : "게시글 목록을 불러오지 못했습니다.");
       } finally {
         if (!cancelled) {
@@ -54,6 +58,7 @@ export function usePosts(blogId?: string) {
 
   return {
     posts,
+    loadedBlogId,
     loading,
     error,
   };

@@ -1,5 +1,4 @@
 export type PostInfo = {
-  id: string;
   blogId: string;
   postId: string;
   category: string;

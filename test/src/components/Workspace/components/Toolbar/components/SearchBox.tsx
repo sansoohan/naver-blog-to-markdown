@@ -3,7 +3,7 @@ import type { PostInfo } from "~/types/post";
 
 type SearchBoxProps = {
   posts: PostInfo[];
-  onSelectPost: (id: string) => void;
+  onSelectPost: (postId: string) => void;
 };
 
 const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBox(
@@ -103,7 +103,7 @@ const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBo
 
   const selectResult = (post: PostInfo) => {
     setQuery("");
-    onSelectPost(post.id);
+    onSelectPost(post.postId);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -175,7 +175,7 @@ const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBo
             {results.length > 0 ? (
               results.map((post, index) => (
                 <button
-                  key={post.id}
+                  key={post.postId}
                   type="button"
                   className={
                     "list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-3 " +

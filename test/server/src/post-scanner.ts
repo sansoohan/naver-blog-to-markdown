@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export type PostInfo = {
-  id: string;
   blogId: string;
   postId: string;
   category: string;
@@ -165,7 +164,6 @@ export async function scanPosts(outputRoot: string, blogId: string): Promise<Pos
           : parts.slice(1, -1).join("/");
 
     posts.push({
-      id: `${blogId}/${postId}`,
       blogId,
       postId,
       category,

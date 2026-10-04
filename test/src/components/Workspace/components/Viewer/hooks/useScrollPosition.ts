@@ -27,11 +27,11 @@ const saveScrollPosition = (postId: string, viewer: ViewerType, frame: HTMLIFram
     y: frameWindow.scrollY,
   };
 
-  sessionStorage.setItem(getScrollStorageKey(postId, viewer), JSON.stringify(position));
+  localStorage.setItem(getScrollStorageKey(postId, viewer), JSON.stringify(position));
 };
 
 const restoreScrollPosition = (postId: string, viewer: ViewerType, frame: HTMLIFrameElement) => {
-  const saved = sessionStorage.getItem(getScrollStorageKey(postId, viewer));
+  const saved = localStorage.getItem(getScrollStorageKey(postId, viewer));
 
   if (!saved) return;
 
@@ -42,7 +42,7 @@ const restoreScrollPosition = (postId: string, viewer: ViewerType, frame: HTMLIF
 
     frame.contentWindow?.scrollTo(position.x, position.y);
   } catch {
-    sessionStorage.removeItem(getScrollStorageKey(postId, viewer));
+    localStorage.removeItem(getScrollStorageKey(postId, viewer));
   }
 };
 

@@ -55,7 +55,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
     restoreOriginalScrollPosition,
     restoreMarkdownScrollPosition,
   } = useScrollPosition({
-    postId: post?.id,
+    postId: post?.postId,
     originalFrameRef,
     markdownFrameRef,
   });
@@ -88,18 +88,18 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
     markdownFrameRef,
     originalLoaded,
     markdownLoaded,
-    postId: post?.id,
+    postId: post?.postId,
     refreshKey,
   });
 
   useEffect(() => {
     onRegisterSaveScrollPositions(saveCurrentScrollPositions);
-  }, [post?.id, onRegisterSaveScrollPositions]);
+  }, [post?.postId, onRegisterSaveScrollPositions]);
 
   useEffect(() => {
     setOriginalLoaded(false);
     setMarkdownLoaded(false);
-  }, [post?.id, refreshKey]);
+  }, [post?.postId, refreshKey]);
 
   useEffect(() => {
     const originalDocument = originalFrameRef.current?.contentDocument;
@@ -112,7 +112,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
     if (markdownDocument) {
       applyMarkdownSettings(markdownDocument, markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes);
     }
-  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, post?.id, refreshKey]);
+  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, post?.postId, refreshKey]);
 
   useEffect(() => {
     const originalWindow = originalFrameRef.current?.contentWindow;
@@ -130,7 +130,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
       originalWindow?.removeEventListener("keydown", onShortcut);
       markdownWindow?.removeEventListener("keydown", onShortcut);
     };
-  }, [originalLoaded, markdownLoaded, onShortcut, post?.id, refreshKey]);
+  }, [originalLoaded, markdownLoaded, onShortcut, post?.postId, refreshKey]);
 
   return (
     <main ref={compareViewRef} className="compare-view d-flex flex-grow-1 bg-body text-body position-relative">
@@ -171,7 +171,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
               <iframe
                 ref={originalFrameRef}
-                key={`${post.id}-html-${refreshKey}`}
+                key={`${post.postId}-html-${refreshKey}`}
                 className={`viewer-frame w-100 h-100 border-0 ${originalLoaded ? "visible" : "invisible"}`}
                 src={getOriginalUrl(post)}
                 title="Original HTML"
@@ -285,7 +285,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
               <iframe
                 ref={markdownFrameRef}
-                key={`${post.id}-markdown-${refreshKey}`}
+                key={`${post.postId}-markdown-${refreshKey}`}
                 className={`viewer-frame w-100 h-100 border-0 ${markdownLoaded ? "visible" : "invisible"}`}
                 src={getMarkdownUrl(post)}
                 title="Markdown"

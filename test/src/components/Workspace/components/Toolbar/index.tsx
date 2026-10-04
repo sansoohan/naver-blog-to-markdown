@@ -13,7 +13,7 @@ type ToolbarProps = {
   onPrevious: () => void;
   onNext: () => void;
   onSelectCategory: (category: string) => void;
-  onSelectPost: (id: string) => void;
+  onSelectPost: (postId: string) => void;
   onRefresh: () => void;
   onSettings: () => void;
 };
@@ -92,12 +92,12 @@ function Toolbar({
 
       <select
         className="form-select form-select-sm min-width-0"
-        value={currentPost?.id ?? ""}
+        value={currentPost?.postId ?? ""}
         onChange={event => onSelectPost(event.target.value)}
         aria-label="게시글 선택"
       >
         {categoryPosts.map(post => (
-          <option key={post.id} value={post.id}>
+          <option key={post.postId} value={post.postId}>
             {post.title || post.folderName}
           </option>
         ))}
