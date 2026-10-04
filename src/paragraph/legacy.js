@@ -4,6 +4,7 @@ const {
   escapeHtmlAttribute,
   getStyleProperty,
   normalizeFontSize,
+  scaleMarkdownFontSize,
   getParagraphFontSize,
   hasMixedFontSizes,
   getHeadingLevel,
@@ -239,6 +240,30 @@ function applyLegacyCssFormattingState(state, css) {
   }
 }
 
+function getLegacyPreservedCss(css) {
+  const result = {};
+
+  for (const [property, value] of Object.entries(css || {})) {
+    if (
+      property === "font-size"
+      || property === "font-family"
+      || property === "letter-spacing"
+      || property === "font-weight"
+      || property === "font-style"
+      || property === "text-decoration"
+      || property === "text-decoration-line"
+      || property === "color"
+      || property === "background-color"
+    ) {
+      continue;
+    }
+
+    result[property] = value;
+  }
+
+  return result;
+}
+
 function applyLegacyStyle(node, state) {
   if (!node || node.type !== "tag") return;
 
@@ -257,7 +282,7 @@ function applyLegacyStyle(node, state) {
   }
 
   if (Object.keys(css).length) {
-    state.css = mergeInlineStyle(state.css, css);
+    state.css = mergeInlineStyle(state.css, getLegacyPreservedCss(css));
     applyLegacyCssFormattingState(state, css);
   }
 
@@ -338,9 +363,12 @@ function mergeLegacyRuns(runs) {
 function renderLegacyStyle(style, preserveFontSize) {
   const css = { ...style.css };
 
-  if (preserveFontSize && style.fontSize !== null && !css["font-size"]) {
-    css["font-size"] = style.fontSize;
+  if (preserveFontSize && style.fontSize !== null) {
+    css["font-size"] = scaleMarkdownFontSize(style.fontSize);
   }
+
+  if (style.color) css.color = style.color;
+  if (style.backgroundColor) css["background-color"] = style.backgroundColor;
 
   return renderInlineStyle(css);
 }
@@ -365,53 +393,48 @@ function renderLegacyHtmlFormatting(text, style, preserveFontSize) {
 function legacyNeedsHtml(style, preserveFontSize) {
   return Boolean(
     preserveFontSize
+    || style.color
+    || style.backgroundColor
     || style.underline
     || Object.keys(style.css).length
   );
 }
 
-function legacyParagraphNeedsHtml(runs, context) {
-  return runs.some((run) => {
-    if (run.type !== "text") return false;
-
-    return legacyNeedsHtml(stripLink(run.style), shouldPreserveRunFontSize(run, context));
-  });
-}
-
-function renderLegacyMarkdownGroupRuns(runs) {
-  return runs.map((run) => renderMarkdownFormatting(run.text, stripLink(run.style))).join("");
-}
-
-function renderLegacyHtmlGroupRuns(runs, context) {
+function renderLegacyMarkdownGroupRuns(runs, context) {
   return runs.map((run) => {
     const style = stripLink(run.style);
+    const preserveFontSize = shouldPreserveRunFontSize(run, context);
 
-    return renderLegacyHtmlFormatting(
-      run.text,
-      style,
-      shouldPreserveRunFontSize(run, context)
-    );
+    if (legacyNeedsHtml(style, preserveFontSize)) {
+      return renderLegacyHtmlFormatting(run.text, style, preserveFontSize);
+    }
+
+    return renderMarkdownFormatting(run.text, style);
   }).join("");
 }
 
 function renderLegacyGroups(runs, context) {
   const groups = groupRunsByLink(runs);
-  const useHtmlFormatting = legacyParagraphNeedsHtml(runs, context);
 
   return groups.map((group) => {
     if (group.type === "break") return "<br>";
 
     if (group.type === "plain") {
-      return useHtmlFormatting
-        ? renderLegacyHtmlGroupRuns(group.runs, context)
-        : renderLegacyMarkdownGroupRuns(group.runs);
+      return renderLegacyMarkdownGroupRuns(group.runs, context);
     }
 
-    if (useHtmlFormatting) {
-      return renderHtmlLink(renderLegacyHtmlGroupRuns(group.runs, context), group.link);
+    const needsHtmlLink = group.runs.some((run) => {
+      const style = stripLink(run.style);
+      return legacyNeedsHtml(style, shouldPreserveRunFontSize(run, context));
+    });
+
+    const content = renderLegacyMarkdownGroupRuns(group.runs, context);
+
+    if (needsHtmlLink) {
+      return renderHtmlLink(content, group.link);
     }
 
-    return renderMarkdownLink(renderLegacyMarkdownGroupRuns(group.runs), group.link);
+    return renderMarkdownLink(content, group.link);
   }).join("");
 }
 

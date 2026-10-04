@@ -34,6 +34,14 @@ function normalizeFontSize(size) {
   return `${Math.round(pixels)}px`;
 }
 
+function scaleMarkdownFontSize(size) {
+  const pixels = getFontSizePixels(size);
+
+  if (pixels === null) return size;
+
+  return `${Math.round(pixels * 16 / 13)}px`;
+}
+
 function getParagraphAlignment(node) {
   if (!node || node.type !== "tag") return "";
 
@@ -247,7 +255,7 @@ function renderHtmlFormatting(text, style, preserveFontSize) {
 
   const css = [];
 
-  if (preserveFontSize && style.fontSize !== null) css.push(`font-size:${style.fontSize}`);
+  if (preserveFontSize && style.fontSize !== null) css.push(`font-size:${scaleMarkdownFontSize(style.fontSize)}`);
 
   if (style.color && (!isBlackColor(style.color) || style.backgroundColor)) {
     css.push(`color:${style.color}`);
@@ -377,6 +385,7 @@ module.exports = {
   escapeHtmlAttribute,
   getStyleProperty,
   normalizeFontSize,
+  scaleMarkdownFontSize,
   getParagraphAlignment,
   getNaverFontSize,
   getHeadingLevel,
