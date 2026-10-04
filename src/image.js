@@ -262,6 +262,23 @@ function applyLocalizedImage(image, filename) {
   }
 }
 
+/*
+ * SmartEditor 1.x / 2.x
+ *
+ * 구형 이미지는 이미지 자체와 상위 wrapper의 HTML 구조가
+ * 실제 크기와 정렬에 관여할 수 있으므로 style을 재구성하지 않는다.
+ *
+ * 원본 속성은 그대로 두고 이미지 URL만 로컬 경로로 교체한다.
+ */
+function applyLocalizedLegacyImage(image, filename) {
+  image.attr("src", `./${filename}`);
+  image.removeAttr("data-lazy-src");
+  image.removeAttr("data-original");
+  image.removeAttr("data-origin-src");
+  image.removeAttr("data-src");
+  image.removeAttr("srcset");
+}
+
 function replaceWithMissingImage(image) {
   const module = image.closest(".se-module.se-module-image");
   const width = getImageWidth(image);
@@ -726,7 +743,11 @@ async function localizeImages($, root, imageManager, options = {}) {
       continue;
     }
 
-    applyLocalizedImage(image, downloaded.filename);
+    if (image.closest(".se-component").length) {
+      applyLocalizedImage(image, downloaded.filename);
+    } else {
+      applyLocalizedLegacyImage(image, downloaded.filename);
+    }
   }
 }
 
