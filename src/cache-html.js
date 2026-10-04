@@ -67,7 +67,7 @@ function acquireBackupLock(timeoutMs = 60000) {
 
       return fd;
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (error.code !== "EEXIST" && error.code !== "EPERM" && error.code !== "EBUSY") throw error;
 
       removeStaleBackupLock();
 
@@ -84,7 +84,17 @@ function releaseBackupLock(fd) {
   try {
     if (fd !== undefined && fd !== null) fs.closeSync(fd);
   } finally {
-    fs.rmSync(LOCK_FILE, {force: true});
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        fs.rmSync(LOCK_FILE, {force: true});
+        break;
+      } catch (error) {
+        if (error.code !== "EPERM" && error.code !== "EBUSY") throw error;
+        if (attempt === 4) throw error;
+
+        sleepSync(50 * (attempt + 1));
+      }
+    }
   }
 }
 
