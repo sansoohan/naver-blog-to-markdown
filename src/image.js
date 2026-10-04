@@ -516,7 +516,7 @@ function createImageManager(outputDir, managerOptions = {}) {
     const {
       highResolution = false,
       fallbackPrefix = "image",
-      timeout = 1000,
+      timeout = 1500,
       previousFilename = "",
     } = options;
 
