@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const cheerio = require("cheerio");
+const prettifyHtml = require("html-prettify");
 const {fetchNaver} = require("./src/naver-request");
 const {makeHtml, detectEditorVersion, getVersion12PostRoot} = require("./src/make-html");
 const {makeMarkdown} = require("./src/make-markdown");
@@ -25,6 +26,7 @@ const {
   finalizeResources,
 } = require("./src/cache-resource");
 const {runCli} = require("./src/cli");
+const {fixHtmlIndentation} = require("./src/indent-html");
 
 const PostVisibility = {
   "0": "private",
@@ -459,7 +461,7 @@ async function convertPost(blogId, logNo, options = {}) {
 
     fs.writeFileSync(
       path.join(tempOutputDir, "original.html"),
-      originalHtml,
+      fixHtmlIndentation(originalHtml),
       "utf8"
     );
 

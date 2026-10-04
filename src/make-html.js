@@ -1,7 +1,4 @@
-const fs = require("fs");
-const path = require("path");
 const cheerio = require("cheerio");
-const prettifyHtml = require("html-prettify");
 const {createImageManager, localizeImages} = require("./image");
 const {restoreYoutubeVideos, localizeNaverVideos} = require("./video");
 const {localizeAttachments} = require("./attachment");
@@ -378,10 +375,6 @@ function deferYouTubeIframes($, root) {
   });
 }
 
-function beautifyArchivedHtml(html) {
-  return prettifyHtml(html);
-}
-
 function protectPostBody(html) {
   return {token: "NAVERPOSTBODYPLACEHOLDER00000000END", content: String(html)};
 }
@@ -520,7 +513,7 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
     </html>
   `;
 
-  return restorePostBody(beautifyArchivedHtml(html), protectedBody);
+  return restorePostBody(html, protectedBody);
 }
 
 module.exports = {makeHtml, getPostRoot, detectEditorVersion, getVersion12PostRoot};
