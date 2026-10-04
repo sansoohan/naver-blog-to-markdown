@@ -17,11 +17,12 @@ if (require.main === module) {
     },
 
     run: async args => {
-      await backupBlog(args.positional[0], {
+      await backupAllCategories(args.positional[0], {
         includePrivate: args.includePrivate,
         update: args.update,
         useCache: args.useCache,
         outputDir: args.outputDir,
+        session: args.session,
       });
     },
   });

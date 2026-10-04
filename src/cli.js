@@ -1,6 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 const {closeNaverRequest} = require("./naver-request");
+const {
+  createSessionId,
+  createSessionDirectory,
+  validateSessionId,
+} = require("./concurrency");
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -10,6 +15,7 @@ function parseArgs(argv) {
   let update = false;
   let useCache = false;
   let outputDir = "";
+  let session = "";
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -36,6 +42,14 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--session" || arg === "-s") {
+      session = args[++index] || "";
+
+      if (!session) throw new Error(`${arg} 뒤에 세션 ID를 지정해주세요.`);
+      if (!validateSessionId(session)) throw new Error(`올바르지 않은 세션 ID입니다: ${session}`);
+      continue;
+    }
+
     if (arg.startsWith("-")) throw new Error(`알 수 없는 옵션: ${arg}`);
 
     positional.push(arg);
@@ -47,12 +61,13 @@ function parseArgs(argv) {
     update,
     useCache,
     outputDir,
+    session,
   };
 }
 
 function getUsage(command, positional) {
   return `사용법: npm run ${command} -- ${positional} `
-    + '[-p|--private] [-u|--update] [-c|--cache] [-o|--output "폴더"]';
+    + '[-p|--private] [-u|--update] [-c|--cache] [-o|--output "폴더"] [-s|--session "세션 ID"]';
 }
 
 function isProcessRunning(pid) {
@@ -144,6 +159,16 @@ async function runCli(options) {
   try {
     const args = parseArgs(process.argv);
 
+    /*
+     * -s / --session이 없으면 프로그램 시작 시각으로
+     * 새로운 세션 ID를 만든다.
+     *
+     * 직접 지정한 경우에는 해당 ID를 그대로 사용한다.
+     */
+    if (!args.session) {
+      args.session = createSessionId();
+    }
+
     includePrivate = args.includePrivate;
 
     if (validate && !validate(args.positional)) {
@@ -157,6 +182,16 @@ async function runCli(options) {
       : path.join(process.cwd(), "output", blogId);
 
     args.outputDir = outputRoot;
+
+    /*
+     * outputRoot가 결정되는 즉시 세션 폴더를 만든다.
+     *
+     * -s로 지정한 세션도 폴더가 없으면 생성하고,
+     * 이미 존재하면 기존 세션 폴더를 그대로 사용한다.
+     */
+    createSessionDirectory(outputRoot, args.session);
+
+    console.log(`세션 ID: ${args.session}`);
 
     cleanupDeadTempDirectories(outputRoot);
 

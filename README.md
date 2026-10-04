@@ -77,6 +77,28 @@ output/
 npm run blog -- "https://blog.naver.com/[네이버ID]" --output "./backup"
 ```
 
+## 동시 백업
+
+여러 터미널에서 동시에 백업을 실행할 수 있습니다.(단, --private 은 하나만 가능)
+
+첫 번째 실행 시 출력되는 세션 ID를 다른 터미널에서 `--session` 또는 `-s`로 지정하면 같은 세션으로 작업합니다. 같은 세션에서는 게시글별 작업 상태를 공유하기에, 여러 프로세스가 같은 게시글을 중복으로 백업하지 않습니다.
+
+터미널 1:
+
+```bash
+npm run b -- https://blog.naver.com/sansoo2002
+```
+
+```text
+세션 ID: 20261004-181217
+```
+
+터미널 2:
+
+```bash
+npm run b -- https://blog.naver.com/sansoo2002 -s 20261004-181217
+```
+
 ## 지원 에디터
 
 | 에디터 | 본문 영역 | 저장 CSS |

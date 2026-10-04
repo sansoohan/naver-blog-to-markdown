@@ -71,6 +71,7 @@ async function backupPosts(blogId, posts, options = {}) {
     update = false,
     useCache = false,
     outputDir = "",
+    session = "",
   } = options;
 
   setBackupOutputRoot(outputDir);
@@ -142,9 +143,14 @@ async function backupPosts(blogId, posts, options = {}) {
         update,
         useCache,
         outputDir,
+        session,
       });
 
-      if (result.status === "skipped") {
+      if (
+        result.status === "skipped"
+        || result.status === "locked"
+        || result.status === "completed"
+      ) {
         skipped++;
       } else if (cached) {
         updated++;
@@ -153,8 +159,17 @@ async function backupPosts(blogId, posts, options = {}) {
         created++;
       }
 
-      cachedPostKeys.add(cacheKey);
-      cachedPostKeys.delete(legacyKey);
+      /*
+       * 작업 중인 글은 아직 이 프로세스에서 완료 여부를 알 수 없으므로
+       * 로컬 cache key 목록에는 반영하지 않는다.
+       *
+       * completed는 같은 세션의 다른 프로세스가 이미 성공한 글이므로
+       * cache에 존재하는 것으로 취급해도 된다.
+       */
+      if (result.status !== "locked") {
+        cachedPostKeys.add(cacheKey);
+        cachedPostKeys.delete(legacyKey);
+      }
     } catch (error) {
       failed++;
 
@@ -222,6 +237,7 @@ async function backupAllCategories(url, options = {}) {
     update = false,
     useCache = false,
     outputDir = "",
+    session = "",
   } = options;
 
   const {blogId} = parseBlogUrl(url);
@@ -247,6 +263,7 @@ async function backupAllCategories(url, options = {}) {
     update,
     useCache,
     outputDir,
+    session,
   });
 
   printBackupSummary("블로그", result);
@@ -260,6 +277,7 @@ async function backupCategory(url, categoryName = "", options = {}) {
     update = false,
     useCache = false,
     outputDir = "",
+    session = "",
   } = options;
 
   const {blogId} = parseBlogUrl(url);
@@ -281,6 +299,7 @@ async function backupCategory(url, categoryName = "", options = {}) {
     update,
     useCache,
     outputDir,
+    session,
   });
 
   printBackupSummary("카테고리", result);
@@ -305,6 +324,7 @@ if (require.main === module) {
         update: args.update,
         useCache: args.useCache,
         outputDir: args.outputDir,
+        session: args.session,
       });
     },
   });
