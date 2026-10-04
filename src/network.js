@@ -61,32 +61,33 @@ async function isInternetDisconnected() {
 }
 
 async function withConnectionRetry(request) {
-  let disconnected = false;
+  let retried = false;
 
   while (true) {
     try {
-      const result = await request();
-
-      if (disconnected) {
-        console.error("인터넷 연결이 복구되었습니다.");
-        console.error("");
-      }
-
-      return result;
+      return await request();
     } catch (error) {
       if (!isNetworkError(error)) throw error;
 
-      if (!await isInternetDisconnected()) {
-        await sleep(5000);
-        throw error;
-      }
-
-      if (!disconnected) {
+      if (await isInternetDisconnected()) {
         console.error("");
         console.error("인터넷 연결이 끊어졌습니다.");
         console.error("연결이 복구될 때까지 기다립니다.");
-        disconnected = true;
+
+        while (await isInternetDisconnected()) {
+          await sleep(5000);
+        }
+
+        console.error("인터넷 연결이 복구되었습니다.");
+        console.error("");
+
+        retried = false;
+        continue;
       }
+
+      if (retried) throw error;
+
+      retried = true;
 
       await sleep(5000);
     }
