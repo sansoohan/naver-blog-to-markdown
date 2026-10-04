@@ -2,10 +2,13 @@ import { useAppSettings } from "~/contexts/AppSettingsContext";
 
 type SettingsPanelProps = {
   show: boolean;
+  blogIds: string[];
+  blogId: string;
+  setBlogId: (blogId: string) => void;
   onClose: () => void;
 };
 
-function SettingsPanel({show, onClose}: SettingsPanelProps) {
+function SettingsPanel({show, blogIds, blogId, setBlogId, onClose}: SettingsPanelProps) {
   const {
     removeParagraphMargins,
     setRemoveParagraphMargins,
@@ -16,6 +19,13 @@ function SettingsPanel({show, onClose}: SettingsPanelProps) {
     syncScroll,
     setSyncScroll,
   } = useAppSettings();
+
+  const changeBlogId = (nextBlogId: string) => {
+    if (nextBlogId === blogId) return;
+
+    onClose();
+    setBlogId(nextBlogId);
+  };
 
   return (
     <>
@@ -40,8 +50,32 @@ function SettingsPanel({show, onClose}: SettingsPanelProps) {
           </button>
         </div>
 
-        <div className="overflow-auto flex-grow-1" style={{minHeight: 0}}>
+        <div className="settings-panel-body overflow-auto flex-grow-1">
           <div className="list-group list-group-flush">
+            <div className="p-3">
+              <label className="form-label small fw-semibold mb-2" htmlFor="blogId">
+                블로그 ID
+              </label>
+
+              <select
+                id="blogId"
+                className="form-select form-select-sm"
+                value={blogId}
+                onChange={event => changeBlogId(event.target.value)}
+                disabled={blogIds.length === 0}
+              >
+                {blogIds.length === 0 ? (
+                  <option value="">백업된 블로그 없음</option>
+                ) : (
+                  blogIds.map(id => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
             <label
               className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-3 py-3"
               htmlFor="removeParagraphMargins"

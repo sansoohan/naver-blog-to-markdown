@@ -3,6 +3,8 @@ import path from "node:path";
 
 export type PostInfo = {
   id: string;
+  blogId: string;
+  postId: string;
   category: string;
   folderName: string;
   relativePath: string;
@@ -27,41 +29,91 @@ type BackupCacheEntry = {
 
 type BackupCache = Record<string, BackupCacheEntry>;
 
-function normalizeRelativePath(outputRoot: string, cachedPath: string): string {
+function normalizeRelativePath(outputRoot: string, blogId: string, cachedPath: string): string {
   const normalizedCachedPath = cachedPath.replaceAll("\\", "/");
   const normalizedOutputRoot = outputRoot.replaceAll("\\", "/");
   const outputFolderName = path.basename(normalizedOutputRoot);
-
-  if (normalizedCachedPath === outputFolderName) {
-    return "";
-  }
-
-  if (normalizedCachedPath.startsWith(`${outputFolderName}/`)) {
-    return normalizedCachedPath.slice(outputFolderName.length + 1);
-  }
+  const blogOutputRoot = path.join(outputRoot, blogId);
+  const normalizedBlogOutputRoot = blogOutputRoot.replaceAll("\\", "/");
 
   if (path.isAbsolute(cachedPath)) {
     return path.relative(outputRoot, cachedPath).replaceAll("\\", "/");
   }
 
-  return normalizedCachedPath;
+  if (normalizedCachedPath.startsWith(`${outputFolderName}/${blogId}/`)) {
+    return normalizedCachedPath.slice(outputFolderName.length + 1);
+  }
+
+  if (normalizedCachedPath.startsWith(`${blogId}/`)) {
+    return normalizedCachedPath;
+  }
+
+  if (normalizedCachedPath.startsWith(`${normalizedBlogOutputRoot}/`)) {
+    return path.relative(outputRoot, cachedPath).replaceAll("\\", "/");
+  }
+
+  return `${blogId}/${normalizedCachedPath}`;
 }
 
-function getSourceUrl(cacheKey: string): string {
+function getPostId(cacheKey: string): string {
   const parts = cacheKey.split("/");
 
-  if (parts.length < 2) return "";
-
-  const blogId = parts[0];
-  const logNo = parts[1];
-
-  if (!blogId || !logNo) return "";
-
-  return `https://blog.naver.com/${blogId}/${logNo}`;
+  return parts.at(-1) || "";
 }
 
-export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
-  const cachePath = path.join(outputRoot, "backup-cache.json");
+export async function scanBlogIds(outputRoot: string): Promise<string[]> {
+  let entries;
+
+  try {
+    entries = await fs.readdir(outputRoot, {withFileTypes: true});
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const blogIds: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === ".tmp") continue;
+
+    const cachePath = path.join(outputRoot, entry.name, "backup-cache.json");
+
+    try {
+      const stat = await fs.stat(cachePath);
+
+      if (stat.isFile()) {
+        blogIds.push(entry.name);
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return blogIds.sort((a, b) =>
+    a.localeCompare(b, "ko", {
+      numeric: true,
+    }),
+  );
+}
+
+export async function scanPosts(outputRoot: string, blogId: string): Promise<PostInfo[]> {
+  const cachePath = path.join(outputRoot, blogId, "backup-cache.json");
 
   let cache: BackupCache;
 
@@ -91,7 +143,11 @@ export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
     if (!entry || typeof entry !== "object") continue;
     if (typeof entry.path !== "string" || !entry.path) continue;
 
-    const relativePath = normalizeRelativePath(outputRoot, entry.path);
+    const postId = getPostId(cacheKey);
+
+    if (!postId) continue;
+
+    const relativePath = normalizeRelativePath(outputRoot, blogId, entry.path);
 
     if (!relativePath) continue;
     if (relativePath === ".." || relativePath.startsWith("../")) continue;
@@ -106,15 +162,17 @@ export async function scanPosts(outputRoot: string): Promise<PostInfo[]> {
         ? entry.categoryPath.join("/")
         : typeof entry.category === "string"
           ? entry.category
-          : parts.slice(0, -1).join("/");
+          : parts.slice(1, -1).join("/");
 
     posts.push({
-      id: relativePath,
+      id: `${blogId}/${postId}`,
+      blogId,
+      postId,
       category,
       folderName,
       relativePath,
       title: typeof entry.title === "string" && entry.title ? entry.title : folderName,
-      sourceUrl: getSourceUrl(cacheKey),
+      sourceUrl: `https://blog.naver.com/${blogId}/${postId}`,
       hasHtml: true,
       hasMarkdown: true,
     });

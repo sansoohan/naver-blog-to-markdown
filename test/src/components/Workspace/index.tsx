@@ -8,14 +8,15 @@ import Toolbar from "./components/Toolbar";
 import Viewer from "./components/Viewer";
 import { useShortcuts } from "./hooks/useShortcuts";
 
-const LAST_VIEWED_POST_KEY = "lastViewedPostId";
-
 type WorkspaceProps = {
   posts: PostInfo[];
   postId?: string;
+  blogIds: string[];
+  blogId: string;
+  setBlogId: (blogId: string) => void;
 };
 
-function Workspace({posts, postId}: WorkspaceProps) {
+function Workspace({posts, postId, blogIds, blogId, setBlogId}: WorkspaceProps) {
   const navigate = useNavigate();
   const {syncScroll, setSyncScroll} = useAppSettings();
 
@@ -28,7 +29,7 @@ function Workspace({posts, postId}: WorkspaceProps) {
 
   const currentIndex = useMemo(() => {
     if (!postId) return -1;
-    return posts.findIndex(post => post.id === postId);
+    return posts.findIndex(post => post.postId === postId);
   }, [posts, postId]);
 
   const currentPost = currentIndex >= 0 ? posts[currentIndex] : undefined;
@@ -44,7 +45,7 @@ function Workspace({posts, postId}: WorkspaceProps) {
 
   const goToPost = (post: PostInfo) => {
     saveScrollPositionsRef.current();
-    navigate(getPostRoute(post.id));
+    navigate(getPostRoute(post.blogId, post.postId));
   };
 
   const goPrevious = () => {
@@ -76,6 +77,15 @@ function Workspace({posts, postId}: WorkspaceProps) {
   const refresh = () => {
     saveScrollPositionsRef.current();
     setRefreshKey(key => key + 1);
+  };
+
+  const changeBlogId = (nextBlogId: string) => {
+    if (nextBlogId === blogId) return;
+
+    saveScrollPositionsRef.current();
+    setSettingsOpen(false);
+    setBlogId(nextBlogId);
+    navigate("/", {replace: true});
   };
 
   const openPostFolder = async () => {
@@ -115,7 +125,8 @@ function Workspace({posts, postId}: WorkspaceProps) {
 
   useEffect(() => {
     if (!currentPost) return;
-    localStorage.setItem(LAST_VIEWED_POST_KEY, currentPost.id);
+
+    localStorage.setItem(`lastViewedPost:${currentPost.blogId}`, currentPost.postId);
   }, [currentPost]);
 
   return (
@@ -193,7 +204,13 @@ function Workspace({posts, postId}: WorkspaceProps) {
         }}
       />
 
-      <SettingsPanel show={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsPanel
+        show={settingsOpen}
+        blogIds={blogIds}
+        blogId={blogId}
+        setBlogId={changeBlogId}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }

@@ -1,9 +1,9 @@
-import express from "express";
+import express, {type Request, type Response} from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { scanPosts } from "./src/post-scanner.js";
+import { scanBlogIds, scanPosts } from "./src/post-scanner.js";
 import markdown from "./src/markdown/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,10 +52,10 @@ app.use(express.json());
  * output 폴더의 파일을 브라우저에서 직접 접근할 수 있게 한다.
  *
  * 예:
- * /output/카테고리/게시글/original.html
- * /output/카테고리/게시글/se.viewer.desktop.css
- * /output/카테고리/게시글/image.jpg
- * /output/카테고리/게시글/video.mp4
+ * /output/네이버ID/카테고리/게시글/original.html
+ * /output/네이버ID/카테고리/게시글/se.viewer.desktop.css
+ * /output/네이버ID/카테고리/게시글/image.jpg
+ * /output/네이버ID/카테고리/게시글/video.mp4
  */
 app.use("/output", express.static(OUTPUT_ROOT));
 
@@ -111,16 +111,49 @@ function getYouTubeDeferredLoaderScript(): string {
 </script>`;
 }
 
-app.get("/api/health", (_request, response) => {
+app.get("/api/health", (_request: Request, response: Response) => {
   response.json({
     status: "ok",
     outputRoot: OUTPUT_ROOT,
   });
 });
 
-app.get("/api/posts", async (_request, response) => {
+app.get("/api/blogs", async (_request: Request, response: Response) => {
   try {
-    const posts = await scanPosts(OUTPUT_ROOT);
+    const blogIds = await scanBlogIds(OUTPUT_ROOT);
+
+    response.json(blogIds);
+  } catch (error) {
+    console.error(error);
+
+    response.status(500).json({
+      error: "블로그 ID 목록을 읽는 중 오류가 발생했습니다.",
+    });
+  }
+});
+
+app.get("/api/posts", async (request: Request, response: Response) => {
+  try {
+    const blogId = request.query.blogId;
+
+    if (typeof blogId !== "string" || !blogId.trim()) {
+      response.status(400).json({
+        error: "blogId가 필요합니다.",
+      });
+      return;
+    }
+
+    const blogIds = await scanBlogIds(OUTPUT_ROOT);
+
+    if (!blogIds.includes(blogId)) {
+      response.status(404).json({
+        error: "블로그 ID를 찾을 수 없습니다.",
+      });
+      return;
+    }
+
+    const posts = await scanPosts(OUTPUT_ROOT, blogId);
+
     response.json(posts);
   } catch (error) {
     console.error(error);
@@ -131,7 +164,7 @@ app.get("/api/posts", async (_request, response) => {
   }
 });
 
-app.post("/api/post/open-folder", async (request, response) => {
+app.post("/api/post/open-folder", async (request: Request, response: Response) => {
   try {
     const relativePath = request.body?.path;
 
@@ -195,7 +228,7 @@ app.post("/api/post/open-folder", async (request, response) => {
  *
  * YouTube 지연 로딩은 original.html 자체에서 처리한다.
  */
-app.get("/api/post/original", async (request, response) => {
+app.get("/api/post/original", async (request: Request, response: Response) => {
   try {
     const relativePath = request.query.path;
 
@@ -232,7 +265,7 @@ app.get("/api/post/original", async (request, response) => {
  * YouTube iframe의 src는 먼저 data-youtube-src로 옮겨 두고,
  * 본문이 로드된 뒤 실제 src를 복구해서 순차적으로 로드한다.
  */
-app.get("/api/post/markdown", async (request, response) => {
+app.get("/api/post/markdown", async (request: Request, response: Response) => {
   try {
     const relativePath = request.query.path;
 

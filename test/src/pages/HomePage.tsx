@@ -4,30 +4,54 @@ import Workspace from "~/components/Workspace";
 import { usePosts } from "~/hooks/usePosts";
 import { getPostRoute } from "~/utils/route";
 
-const LAST_VIEWED_POST_KEY = "lastViewedPostId";
+type HomePageProps = {
+  blogIds: string[];
+  blogId: string;
+  setBlogId: (blogId: string) => void;
+  blogsLoading: boolean;
+  blogsError: string;
+};
 
-function HomePage() {
+function HomePage({
+  blogIds,
+  blogId,
+  setBlogId,
+  blogsLoading,
+  blogsError,
+}: HomePageProps) {
   const navigate = useNavigate();
-  const {posts, loading, error} = usePosts();
+  const {posts, loading, error} = usePosts(blogId);
 
   useEffect(() => {
-    if (loading || error) return;
+    if (blogsLoading || loading || blogsError || error || !blogId || posts.length === 0) return;
 
-    const lastViewedPostId = localStorage.getItem(LAST_VIEWED_POST_KEY);
+    const key = `lastViewedPost:${blogId}`;
+    const lastViewedPostId = localStorage.getItem(key);
 
-    if (!lastViewedPostId) return;
+    if (lastViewedPostId) {
+      const post = posts.find(post => post.postId === lastViewedPostId);
 
-    const exists = posts.some(post => post.id === lastViewedPostId);
+      if (post) {
+        const route = getPostRoute(post.blogId, post.postId);
 
-    if (!exists) {
-      localStorage.removeItem(LAST_VIEWED_POST_KEY);
-      return;
+        console.log("NAVIGATE TO:", route);
+
+        navigate(route, {replace: true});
+        return;
+      }
+
+      localStorage.removeItem(key);
     }
 
-    navigate(getPostRoute(lastViewedPostId), {replace: true});
-  }, [posts, loading, error, navigate]);
+    const firstPost = posts[0];
+    const route = getPostRoute(firstPost.blogId, firstPost.postId);
 
-  if (loading) {
+    console.log("NAVIGATE TO:", route);
+
+    navigate(route, {replace: true});
+  }, [posts, blogId, blogsLoading, loading, blogsError, error, navigate]);
+
+  if (blogsLoading || loading) {
     return (
       <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
         <div className="d-flex align-items-center justify-content-center flex-grow-1 text-secondary small">
@@ -37,15 +61,44 @@ function HomePage() {
     );
   }
 
-  if (error) {
+  if (blogsError || error) {
     return (
       <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
-        <div className="d-flex align-items-center justify-content-center flex-grow-1 text-danger small">{error}</div>
+        <div className="d-flex align-items-center justify-content-center flex-grow-1 text-danger small">
+          {blogsError || error}
+        </div>
       </div>
     );
   }
 
-  return <Workspace posts={posts} />;
+  if (!blogId) {
+    return (
+      <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
+        <div className="d-flex align-items-center justify-content-center flex-grow-1 text-secondary small">
+          백업된 블로그가 없습니다.
+        </div>
+      </div>
+    );
+  }
+
+  if (posts.length === 0) {
+    return (
+      <Workspace
+        posts={posts}
+        blogIds={blogIds}
+        blogId={blogId}
+        setBlogId={setBlogId}
+      />
+    );
+  }
+
+  return (
+    <div className="d-flex flex-column w-100 vh-100 bg-body text-body">
+      <div className="d-flex align-items-center justify-content-center flex-grow-1 text-secondary small">
+        게시글을 여는 중...
+      </div>
+    </div>
+  );
 }
 
 export default HomePage;

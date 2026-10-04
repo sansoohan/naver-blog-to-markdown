@@ -145,18 +145,22 @@ async function runCli(options) {
     const args = parseArgs(process.argv);
 
     includePrivate = args.includePrivate;
-    outputRoot = args.outputDir
-      ? path.resolve(args.outputDir)
-      : path.join(process.cwd(), "output");
-
-    cleanupDeadTempDirectories(outputRoot);
 
     if (validate && !validate(args.positional)) {
       throw new Error(getUsage(command, positional));
     }
 
+    const blogId = getBlogId(args.positional);
+
+    outputRoot = args.outputDir
+      ? path.resolve(args.outputDir)
+      : path.join(process.cwd(), "output", blogId);
+
+    args.outputDir = outputRoot;
+
+    cleanupDeadTempDirectories(outputRoot);
+
     if (includePrivate) {
-      const blogId = getBlogId(args.positional);
       const {ensureLogin} = require("./auth");
 
       await ensureLogin(blogId);
