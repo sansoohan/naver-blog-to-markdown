@@ -235,6 +235,7 @@ function printBackupSummary(label, result) {
 async function backupAllCategories(url, options = {}) {
   const {
     includePrivate = false,
+    privateOnly = false,
     update = false,
     useCache = false,
     outputDir = "",
@@ -245,7 +246,7 @@ async function backupAllCategories(url, options = {}) {
 
   console.log(`블로그: ${blogId}`);
 
-  const posts = await withCategorySearchLock(outputDir, blogId, async () => {
+  let posts = await withCategorySearchLock(outputDir, blogId, async () => {
     console.log("카테고리 목록을 가져오는 중...");
 
     const categories = await getCategoryList(blogId, {includePrivate});
@@ -264,6 +265,10 @@ async function backupAllCategories(url, options = {}) {
     return posts;
   });
 
+  if (privateOnly) {
+    posts = posts.filter(post => String(post.openType) !== "2");
+  }
+
   const result = await backupPosts(blogId, posts, {
     includePrivate,
     update,
@@ -280,6 +285,7 @@ async function backupAllCategories(url, options = {}) {
 async function backupCategory(url, categoryName = "", options = {}) {
   const {
     includePrivate = false,
+    privateOnly = false,
     update = false,
     useCache = false,
     outputDir = "",
@@ -303,11 +309,15 @@ async function backupCategory(url, categoryName = "", options = {}) {
 
   console.log(`\n선택: ${formatCategory(category, categories)}`);
 
-  const posts = await withCategorySearchLock(outputDir, blogId, async () => {
+  let posts = await withCategorySearchLock(outputDir, blogId, async () => {
     console.log("게시글 목록을 가져오는 중...");
 
     return await getCategoryPosts(blogId, category, categories, {includePrivate});
   });
+
+  if (privateOnly) {
+    posts = posts.filter(post => String(post.openType) !== "2");
+  }
 
   const result = await backupPosts(blogId, posts, {
     includePrivate,
@@ -336,6 +346,7 @@ if (require.main === module) {
     run: async args => {
       await backupCategory(args.positional[0], args.positional[1] || "", {
         includePrivate: args.includePrivate,
+        privateOnly: args.privateOnly,
         update: args.update,
         useCache: args.useCache,
         outputDir: args.outputDir,

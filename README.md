@@ -28,10 +28,14 @@ npm run page -- "https://blog.naver.com/[네이버ID]/[포스팅번호]"        
 npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]"           # 카테고리 전체 글
 npm run blog -- "https://blog.naver.com/[네이버ID]"                            # 모든 글
 
-# 비공개 글 포함
+# 비공개, 이웃공개, 서로이웃공개 글 포함
 npm run page -- "https://blog.naver.com/[네이버ID]/[포스팅번호]" --private       # 단일 글
 npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --private # 카테고리 전체 글
 npm run blog -- "https://blog.naver.com/[네이버ID]" --private                  # 모든 글
+
+# 비공개, 이웃공개, 서로이웃공개 글만
+npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --private-only # 카테고리 전체 글
+npm run blog -- "https://blog.naver.com/[네이버ID]" --private-only                  # 모든 글
 
 # 수정된 글만 다시 백업
 npm run category -- "https://blog.naver.com/[네이버ID]" "[카테고리명]" --update  # 업데이트된 카테고리 글

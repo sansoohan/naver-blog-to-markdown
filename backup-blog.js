@@ -19,6 +19,7 @@ if (require.main === module) {
     run: async args => {
       await backupAllCategories(args.positional[0], {
         includePrivate: args.includePrivate,
+        privateOnly: args.privateOnly,
         update: args.update,
         useCache: args.useCache,
         outputDir: args.outputDir,

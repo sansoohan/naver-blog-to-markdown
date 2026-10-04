@@ -12,6 +12,7 @@ function parseArgs(argv) {
   const positional = [];
 
   let includePrivate = false;
+  let privateOnly = false;
   let update = false;
   let useCache = false;
   let outputDir = "";
@@ -22,6 +23,12 @@ function parseArgs(argv) {
 
     if (arg === "--private" || arg === "-p") {
       includePrivate = true;
+      continue;
+    }
+
+    if (arg === "--private-only" || arg === "-P") {
+      includePrivate = true;
+      privateOnly = true;
       continue;
     }
 
@@ -58,6 +65,7 @@ function parseArgs(argv) {
   return {
     positional,
     includePrivate,
+    privateOnly,
     update,
     useCache,
     outputDir,
@@ -67,7 +75,7 @@ function parseArgs(argv) {
 
 function getUsage(command, positional) {
   return `사용법: npm run ${command} -- ${positional} `
-    + '[-p|--private] [-u|--update] [-c|--cache] [-o|--output "폴더"] [-s|--session "세션 ID"]';
+    + '[-p|--private] [-P|--private-only] [-u|--update] [-c|--cache] [-o|--output "폴더"] [-s|--session "세션 ID"]';
 }
 
 function isProcessRunning(pid) {
