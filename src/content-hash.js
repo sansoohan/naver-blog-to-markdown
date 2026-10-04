@@ -97,6 +97,27 @@ function createContentHash(root) {
       }
 
       /*
+       * [해시 제외 - 빈 class 속성]
+       *
+       * 네이버가 동일한 요소를 렌더링하면서 class=""를 추가하거나
+       * class 속성 자체를 생략하는 경우가 있다.
+       *
+       * 실제 확인된 차이:
+       *
+       *   <img ... class="">
+       *   <img ...>
+       *
+       * 실제 클래스가 없는 동일한 요소이므로 빈 class 속성은 해시에서 제외한다.
+       *
+       * 중요:
+       * 다른 빈 속성은 존재 여부 자체가 의미를 가질 수 있으므로 제거하지 않는다.
+       */
+      if (["class", "style", "align"].includes(name) && !String(attrs[name] || "").trim()) {
+        $el.removeAttr(name);
+        continue;
+      }
+
+      /*
        * [해시 제외 - data-* 속성]
        *
        * 네이버 내부 동작과 렌더링 상태에 사용되는 data-* 속성은 실행 시 달라질 수 있으므로 제외한다.
