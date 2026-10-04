@@ -86,7 +86,7 @@ npm run blog -- "https://blog.naver.com/[네이버ID]" --output "./backup"
 터미널 1:
 
 ```bash
-npm run b -- https://blog.naver.com/sansoo2002
+npm run b -- "https://blog.naver.com/[네이버ID]"
 ```
 
 ```text
@@ -96,8 +96,10 @@ npm run b -- https://blog.naver.com/sansoo2002
 터미널 2:
 
 ```bash
-npm run b -- https://blog.naver.com/sansoo2002 -s 20261004-181217
+npm run b -- "https://blog.naver.com/[네이버ID]" --session "[세션ID]"
 ```
+
+- `[세션ID]` 는 `output/[블로그ID]/.cuncurrency/` 에서 확인할 수 있습니다.
 
 ## 지원 에디터
 

@@ -3,6 +3,7 @@ const {convertPost} = require("./backup-page");
 const {setBackupOutputRoot, checkBackupCache} = require("./src/cache-html");
 const backupMonitor = require("./src/backup-monitor");
 const {runCli} = require("./src/cli");
+const {withCategorySearchLock} = require("./src/category-search-lock");
 const {
   parseBlogUrl,
   getCategoryList,
@@ -243,20 +244,25 @@ async function backupAllCategories(url, options = {}) {
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
-  console.log("카테고리 목록을 가져오는 중...");
 
-  const categories = await getCategoryList(blogId, {includePrivate});
-  updateCategories(categories, outputDir, blogId);
-  const targetCategories = getPostCategories(categories);
+  const posts = await withCategorySearchLock(outputDir, blogId, async () => {
+    console.log("카테고리 목록을 가져오는 중...");
 
-  console.log(`확인할 카테고리: ${targetCategories.length}개`);
+    const categories = await getCategoryList(blogId, {includePrivate});
+    updateCategories(categories, outputDir, blogId);
+    const targetCategories = getPostCategories(categories);
 
-  const posts = await getAllCategoryPosts(blogId, targetCategories, {
-    includePrivate,
-    quiet: false,
+    console.log(`확인할 카테고리: ${targetCategories.length}개`);
+
+    const posts = await getAllCategoryPosts(blogId, targetCategories, {
+      includePrivate,
+      quiet: false,
+    });
+
+    console.log(`전체 글 수: ${posts.length}`);
+
+    return posts;
   });
-
-  console.log(`전체 글 수: ${posts.length}`);
 
   const result = await backupPosts(blogId, posts, {
     includePrivate,
@@ -283,16 +289,25 @@ async function backupCategory(url, categoryName = "", options = {}) {
   const {blogId} = parseBlogUrl(url);
 
   console.log(`블로그: ${blogId}`);
-  console.log("카테고리 목록을 가져오는 중...");
 
-  const categories = await getCategoryList(blogId, {includePrivate});
-  updateCategories(categories, outputDir, blogId);
+  const categories = await withCategorySearchLock(outputDir, blogId, async () => {
+    console.log("카테고리 목록을 가져오는 중...");
+
+    const categories = await getCategoryList(blogId, {includePrivate});
+    updateCategories(categories, outputDir, blogId);
+
+    return categories;
+  });
+
   const category = await selectCategory(categories, categoryName);
 
   console.log(`\n선택: ${formatCategory(category, categories)}`);
-  console.log("게시글 목록을 가져오는 중...");
 
-  const posts = await getCategoryPosts(blogId, category, categories, {includePrivate});
+  const posts = await withCategorySearchLock(outputDir, blogId, async () => {
+    console.log("게시글 목록을 가져오는 중...");
+
+    return await getCategoryPosts(blogId, category, categories, {includePrivate});
+  });
 
   const result = await backupPosts(blogId, posts, {
     includePrivate,
