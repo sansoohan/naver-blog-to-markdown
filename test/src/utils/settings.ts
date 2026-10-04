@@ -55,6 +55,13 @@ export function applyMarkdownSettings(
 
   if (removeParagraphMargins) {
     rules.push(`
+      li > p,
+      li > h1,
+      li > h2,
+      li > h3,
+      li > h4,
+      li > h5,
+      li > h6,
       body > p,
       body > h1,
       body > h2,
@@ -62,8 +69,14 @@ export function applyMarkdownSettings(
       body > h4,
       body > h5,
       body > h6 {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
+        margin-top: 0;
+        margin-bottom: 0;
+      }
+
+      ul,
+      ol {
+        padding-inline-start: 2em;
+        margin: 0;
       }
     `);
   }
