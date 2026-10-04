@@ -8,7 +8,7 @@ const {
 } = require("./category");
 
 const POST_LIST_COUNT = 30;
-const POST_LIST_MIN_INTERVAL = 50;
+const POST_LIST_MIN_INTERVAL = 150;
 const POST_LIST_MAX_INTERVAL = 2000;
 const postListStates = new Map();
 
@@ -85,7 +85,7 @@ function increasePostListInterval(categoryNo) {
   const state = getPostListState(categoryNo);
 
   state.interval = Math.min(
-    Math.max(state.interval * 2, 200),
+    Math.max(state.interval * 2, 300),
     POST_LIST_MAX_INTERVAL
   );
 
