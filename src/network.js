@@ -5,10 +5,6 @@ function sleep(ms) {
 function isNetworkError(error) {
   if (!error) return false;
 
-  if (error.name === "AbortError" || error.name === "TimeoutError") {
-    return true;
-  }
-
   if (error instanceof TypeError && error.message === "fetch failed") {
     return true;
   }

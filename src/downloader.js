@@ -403,7 +403,18 @@ async function download(url, options = {}) {
   try {
     const head = await fetchResourceMetadata(source, requestOptions);
     headMetadata = head.metadata;
-  } catch {}
+  } catch (error) {
+    /*
+    * HEAD 자체를 지원하지 않거나 HTTP 오류가 발생한 경우에는
+    * 실제 GET이 성공할 수 있으므로 정상적으로 GET을 시도한다.
+    *
+    * 반면 HEAD가 timeout된 경우에는 같은 서버에 GET을 다시 보내도
+    * 동일하게 timeout될 가능성이 높으므로 해당 URL을 즉시 실패 처리한다.
+    */
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      throw error;
+    }
+  }
 
   if (headMetadata) {
     const cached = getResourceState(headMetadata);
