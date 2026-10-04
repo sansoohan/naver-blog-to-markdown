@@ -201,6 +201,7 @@ function escapeMarkdownText(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\\/g, "\\\\")
+    .replace(/\+/g, "\\+")
     .replace(/([`*_[\]~])/g, "\\$1")
     .replace(/^([ \t]*)(#{1,6}|>|[-+])(?=\s)/gm, "$1\\$2")
     .replace(/^([ \t]*)(\d+)\.(?=\s)/gm, "$1$2\\.");
