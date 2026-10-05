@@ -300,6 +300,11 @@ function shouldPreserveRunFontSize(run, context) {
   if (context.heading) return false;
 
   /*
+   * SmartEditor 3.x는 se_fs_T* 클래스에 지정된 본문 크기를 보존한다.
+   */
+  if (context.editorVersion === 3) return true;
+
+  /*
    * 서로 다른 폰트 크기가 한 문단에 섞여 있으면 Markdown heading으로
    * 표현할 수 없으므로 각 run의 원래 크기를 그대로 보존한다.
    */

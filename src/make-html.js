@@ -140,7 +140,11 @@ function getPostViewCssInfo($) {
 }
 
 function getViewerCssInfo($, editorVersion) {
-  if (editorVersion === 3 || editorVersion === 4) {
+  if (editorVersion === 3) {
+    return getStylesheetInfo($, /se_viewer_blog_pc_[^/]*\.css/i, "se.viewer.desktop.css");
+  }
+
+  if (editorVersion === 4) {
     return getStylesheetInfo($, /se\.viewer\.desktop(?:\.min)?\.css/i, "se.viewer.desktop.css");
   }
 
@@ -374,7 +378,12 @@ function getArchiveOverrideCss(editorVersion, containerWidth) {
     `#content-area{${containerWidth ? `width:${containerWidth}px;` : ""}display:block;float:none;margin:0 auto;}`,
   ];
 
-  if (editorVersion === 3 || editorVersion === 4) {
+  if (editorVersion === 3) {
+    rules.push(`html,body{min-width:0;}`);
+    rules.push(`#post-area .bcc>[id^="post-view"]{margin-left:0;margin-right:0;}`);
+  }
+
+  if (editorVersion === 4) {
     rules.push(`#post-area .bcc>[id^="post-view"].wrap_rabbit{margin:auto;}`);
   }
 
@@ -518,6 +527,7 @@ function getYouTubeLoaderScript() {
 
 async function makeHtml(rawHtml, outputDir, options = {}) {
   const $ = cheerio.load(rawHtml, {decodeEntities: false});
+
   const editorVersion = options.editorVersion ?? detectEditorVersion($);
   const root = getPostRoot($, editorVersion);
   const bodyAttributes = getBodyAttributes($);

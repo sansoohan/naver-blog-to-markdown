@@ -124,6 +124,21 @@ function mergeRuns(runs) {
   return result;
 }
 
+function getVersion3FontSize(node) {
+  const className = node?.attribs?.class || "";
+  const match = className.match(/\bse_fs_T([1-5])\b/);
+
+  if (!match) return null;
+
+  return {
+    1: "28px",
+    2: "19px",
+    3: "16px",
+    4: "13px",
+    5: "11px",
+  }[match[1]] ?? null;
+}
+
 function paragraphNeedsHtml(runs, context) {
   return runs.some((run) => {
     if (run.type !== "text") return false;
@@ -169,8 +184,14 @@ function renderGroups(runs, context) {
   }).join("");
 }
 
-function renderParagraph(node) {
-  let runs = mergeRuns(collectStyleRuns(node));
+function renderParagraph(node, options = {}) {
+  const inherited = createStyleState();
+
+  if (options.fontSize !== undefined && options.fontSize !== null) {
+    inherited.fontSize = options.fontSize;
+  }
+
+  let runs = mergeRuns(collectStyleRuns(node, inherited));
 
   const plainText = runs.filter((run) => run.type === "text").map((run) => run.text).join("");
   const hasBreak = runs.some((run) => run.type === "break");
@@ -205,6 +226,7 @@ function renderParagraph(node) {
     mixed,
     checkbox: Boolean(checkbox),
     heading,
+    editorVersion: options.editorVersion || 0,
   };
 
   let content = renderGroups(runs, context);
@@ -304,7 +326,29 @@ function protectTextLists($, root, store) {
   }
 }
 
+function protectVersion3TextComponents($, root, store) {
+  root.find(".se_component.se_paragraph").each((_, element) => {
+    const component = $(element);
+    const textView = component.find(".se_textView").first();
+    const paragraph = textView.find("p.se_textarea").first();
+
+    if (!paragraph.length) return;
+
+    const fontSize = getVersion3FontSize(textView[0]);
+    const rendered = renderParagraph(paragraph[0], {fontSize, editorVersion: 3});
+    const value = rendered.empty ? "NAVEREMPTYLINE" : rendered.text;
+    const token = store.add(value);
+
+    component.replaceWith(`<div class="naver-protected">${token}</div>`);
+  });
+}
+
 function protectTextComponents($, root, store, editorVersion) {
+  if (editorVersion === 3) {
+    protectVersion3TextComponents($, root, store);
+    return;
+  }
+
   /*
    * SmartEditor 3.x 이상
    *
