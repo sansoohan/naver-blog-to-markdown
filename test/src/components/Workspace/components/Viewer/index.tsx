@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "~/contexts/AppSettingsContext";
 import type { PostInfo } from "~/types/post";
-import { applyFontSetting, applyMarkdownSettings, applyOriginalSettings } from "~/utils/settings";
+import { applyMarkdownSettings, applyOriginalSettings } from "~/utils/settings";
 import { useScrollPosition } from "./hooks/useScrollPosition";
 import { useScrollSync } from "./hooks/useScrollSync";
 import { useSplitter } from "./hooks/useSplitter";
@@ -61,11 +61,17 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
   });
 
   const getOriginalUrl = (post: PostInfo) => {
-    return `/api/post/original?path=${encodeURIComponent(post.relativePath)}&refresh=${refreshKey}`;
+    return (
+      `/api/post/original?path=${encodeURIComponent(post.relativePath)}` +
+      `&applyFonts=${applyFonts ? "1" : "0"}&refresh=${refreshKey}`
+    );
   };
 
   const getMarkdownUrl = (post: PostInfo) => {
-    return `/api/post/markdown?path=${encodeURIComponent(post.relativePath)}&refresh=${refreshKey}`;
+    return (
+      `/api/post/markdown?path=${encodeURIComponent(post.relativePath)}` +
+      `&applyFonts=${applyFonts ? "1" : "0"}&refresh=${refreshKey}`
+    );
   };
 
   const changeMarkdownZoom = (amount: number) => {
@@ -99,29 +105,26 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
   useEffect(() => {
     setOriginalLoaded(false);
     setMarkdownLoaded(false);
-  }, [post?.postId, refreshKey]);
+  }, [post?.postId, refreshKey, applyFonts]);
 
   useEffect(() => {
     const originalDocument = originalFrameRef.current?.contentDocument;
     const markdownDocument = markdownFrameRef.current?.contentDocument;
 
     if (originalDocument) {
-      applyFontSetting(originalDocument, applyFonts);
       applyOriginalSettings(originalDocument, darkMode);
     }
 
     if (markdownDocument) {
-      applyFontSetting(markdownDocument, applyFonts);
       applyMarkdownSettings(
         markdownDocument,
         markdownZoom,
         removeParagraphMargins,
         darkMode,
-        fancyCheckboxes,
-        applyFonts
+        fancyCheckboxes
       );
     }
-  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, applyFonts, post?.postId, refreshKey]);
+  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, post?.postId, refreshKey]);
 
   useEffect(() => {
     const originalWindow = originalFrameRef.current?.contentWindow;
@@ -180,7 +183,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
               <iframe
                 ref={originalFrameRef}
-                key={`${post.postId}-html-${refreshKey}`}
+                key={`${post.postId}-html-${applyFonts ? "fonts" : "fallback"}-${refreshKey}`}
                 className={`viewer-frame w-100 h-100 border-0 ${originalLoaded ? "visible" : "invisible"}`}
                 src={getOriginalUrl(post)}
                 title="Original HTML"
@@ -189,7 +192,6 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
                   if (!document) return;
 
-                  applyFontSetting(document, applyFonts);
                   applyOriginalSettings(document, darkMode);
                   restoreOriginalScrollPosition(event.currentTarget);
                   setOriginalLoaded(true);
@@ -295,7 +297,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
               <iframe
                 ref={markdownFrameRef}
-                key={`${post.postId}-markdown-${refreshKey}`}
+                key={`${post.postId}-markdown-${applyFonts ? "fonts" : "fallback"}-${refreshKey}`}
                 className={`viewer-frame w-100 h-100 border-0 ${markdownLoaded ? "visible" : "invisible"}`}
                 src={getMarkdownUrl(post)}
                 title="Markdown"
@@ -304,15 +306,12 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
                   if (!document) return;
 
-                  applyFontSetting(document, applyFonts);
-
                   applyMarkdownSettings(
                     document,
                     markdownZoom,
                     removeParagraphMargins,
                     darkMode,
-                    fancyCheckboxes,
-                    applyFonts
+                    fancyCheckboxes
                   );
 
                   restoreMarkdownScrollPosition(event.currentTarget);

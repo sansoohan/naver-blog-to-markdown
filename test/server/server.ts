@@ -301,6 +301,7 @@ app.post("/api/post/open-folder", async (request: Request, response: Response) =
 app.get("/api/post/original", async (request: Request, response: Response) => {
   try {
     const relativePath = request.query.path;
+    const applyFonts = request.query.applyFonts === "1";
 
     if (typeof relativePath !== "string") {
       response.status(400).send("path가 필요합니다.");
@@ -315,12 +316,32 @@ app.get("/api/post/original", async (request: Request, response: Response) => {
     }
 
     const filePath = path.join(postDirectory, "original.html");
-
-    await fs.access(filePath);
+    let html = await fs.readFile(filePath, "utf8");
 
     const encodedPath = encodeRelativePath(relativePath);
+    const baseUrl = `/output/${encodedPath}/`;
 
-    response.redirect(`/output/${encodedPath}/original.html`);
+    const fontHead = applyFonts
+      ? `<link id="viewer-fonts" rel="stylesheet" href="/api/fonts.css">`
+      : `<style id="viewer-font-override">
+  .se-viewer,
+  .se-viewer *,
+  .post,
+  .post * {
+    font-family: Arial, "Noto Sans KR", sans-serif !important;
+  }
+
+  body {
+    font-family: Arial, "Noto Sans KR", sans-serif !important;
+  }
+</style>`;
+
+    html = html.replace(
+      /<head(\s[^>]*)?>/i,
+      match => `${match}\n<base href="${baseUrl}">\n${fontHead}`,
+    );
+
+    response.type("html").send(html);
   } catch (error) {
     console.error(error);
     response.status(404).send("original.html을 찾을 수 없습니다.");
@@ -338,6 +359,7 @@ app.get("/api/post/original", async (request: Request, response: Response) => {
 app.get("/api/post/markdown", async (request: Request, response: Response) => {
   try {
     const relativePath = request.query.path;
+    const applyFonts = request.query.applyFonts === "1";
 
     if (typeof relativePath !== "string") {
       response.status(400).send("path가 필요합니다.");
@@ -359,6 +381,17 @@ app.get("/api/post/markdown", async (request: Request, response: Response) => {
     const encodedPath = encodeRelativePath(relativePath);
     const baseUrl = `/output/${encodedPath}/`;
 
+    const fontHead = applyFonts
+      ? `
+  <link id="viewer-fonts" rel="stylesheet" href="/api/fonts.css">
+
+  <style>
+    body {
+      font-family: se-nanumgothic, Arial, "나눔고딕", NanumGothic, sans-serif, Meiryo !important;
+    }
+  </style>`
+      : "";
+
     response.type("html").send(`<!doctype html>
 <html lang="ko">
 <head>
@@ -368,6 +401,7 @@ app.get("/api/post/markdown", async (request: Request, response: Response) => {
   <base href="${baseUrl}">
 
   <title>Markdown Preview</title>
+${fontHead}
 
   <style>
     * {
