@@ -205,6 +205,7 @@ async function downloadCssFonts(cssPath, outputRoot) {
     }
 
     if (!filename) continue;
+    if (filename.toLowerCase() === "nanumbarungothic-blod.woff2") continue;
 
     const destination = path.join(fontDir, filename);
     if (fs.existsSync(destination)) continue;
