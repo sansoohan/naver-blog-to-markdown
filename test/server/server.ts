@@ -59,6 +59,25 @@ app.use(express.json());
  */
 app.use("/output", express.static(OUTPUT_ROOT));
 
+app.use("/fonts", express.static(path.join(OUTPUT_ROOT, ".font")));
+
+/*
+ * SmartEditor V1 예외
+ *
+ * 구형 블로그의 blog-layout.css는 WOFF2 파일명과
+ * 실제 font-family 이름이 일치하지 않는 폰트가 있다.
+ */
+const V1_FONT_FACE_INFO: Record<string, {family: string; weight: number}> = {
+  "blogCommonIconFont12.woff2": {family: "blogCommonIconFont", weight: 400},
+  "NanumSquareEB.woff2": {family: "NanumSquareWebFont", weight: 800},
+  "NanumGothic-Regular.woff2": {family: "NanumGothicWebFont", weight: 400},
+  "NanumGothic-Bold.woff2": {family: "NanumGothicWebFont", weight: 700},
+  "nanummyeongjo-regular.woff2": {family: "NanumMyeongjoWebFont", weight: 400},
+  "nanummyeongjo-bold.woff2": {family: "NanumMyeongjoWebFont", weight: 700},
+  "nanumbarungothic-regular.woff2": {family: "NanumBarunGothicWebFont", weight: 400},
+  "nanumbarungothic-blod.woff2": {family: "NanumBarunGothicWebFont", weight: 700},
+};
+
 function resolvePostDirectory(relativePath: string): string | null {
   const postDirectory = path.resolve(OUTPUT_ROOT, relativePath);
   const relative = path.relative(OUTPUT_ROOT, postDirectory);
@@ -110,6 +129,57 @@ function getYouTubeDeferredLoaderScript(): string {
 })();
 </script>`;
 }
+
+function getFontFaceInfo(filename: string) {
+  const v1 = V1_FONT_FACE_INFO[filename];
+
+  if (v1) {
+    return v1;
+  }
+
+  const basename = filename.replace(/\.woff2$/i, "");
+  const match = basename.match(/^(.*)-(regular|semibold|bold)$/i);
+
+  if (!match) {
+    return {family: basename, weight: 400};
+  }
+
+  const weight = match[2].toLowerCase() === "bold" ? 700 : match[2].toLowerCase() === "semibold" ? 600 : 400;
+  return {family: match[1], weight};
+}
+
+app.get("/api/fonts.css", async (_request: Request, response: Response) => {
+  try {
+    const fontDir = path.join(OUTPUT_ROOT, ".font");
+    let entries;
+
+    try {
+      entries = await fs.readdir(fontDir, {withFileTypes: true});
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        response.type("text/css").send("");
+        return;
+      }
+
+      throw error;
+    }
+
+    const rules = entries
+      .filter(entry => entry.isFile() && /\.woff2$/i.test(entry.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(entry => {
+        const {family, weight} = getFontFaceInfo(entry.name);
+        const encodedFilename = encodeURIComponent(entry.name);
+
+        return `@font-face{font-family:${JSON.stringify(family)};font-style:normal;font-weight:${weight};src:url("/fonts/${encodedFilename}") format("woff2");}`;
+      });
+
+    response.type("text/css").send(rules.join("\n"));
+  } catch (error) {
+    console.error(error);
+    response.status(500).type("text/css").send("");
+  }
+});
 
 app.get("/api/health", (_request: Request, response: Response) => {
   response.json({

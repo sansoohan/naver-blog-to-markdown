@@ -49,6 +49,7 @@ async function download(url, options = {}) {
     logLabel,
     overwrite,
     retries,
+    noCache,
   } = requestOptions;
 
   const source = normalizeUrl(url);
@@ -66,13 +67,15 @@ async function download(url, options = {}) {
    * 다운로드에 실패한 경우에는 원본 filename이나
    * Content-Length를 얻지 못했을 수 있기 때문이다.
    */
-  const previousError = getResourceError(source);
+  if (!noCache) {
+    const previousError = getResourceError(source);
 
-  if (previousError?.status === "error") {
-    throw new Error(
-      `이전 다운로드 실패로 재시도 안 함: ${source}`
-      + `${previousError.error ? ` - ${previousError.error}` : ""}`
-    );
+    if (previousError?.status === "error") {
+      throw new Error(
+        `이전 다운로드 실패로 재시도 안 함: ${source}`
+        + `${previousError.error ? ` - ${previousError.error}` : ""}`
+      );
+    }
   }
 
   /*
@@ -105,7 +108,7 @@ async function download(url, options = {}) {
     } catch {}
   }
 
-  if (headMetadata) {
+  if (!noCache && headMetadata) {
     const cached = getResourceState(headMetadata);
 
     if (cached?.status === "ok") {
@@ -153,7 +156,7 @@ async function download(url, options = {}) {
    * 연결이 복구될 때까지 기다린 뒤 같은 요청을 다시 시도해야 한다.
    */
   if (!fetched) {
-    if (!isNetworkError(fetchError)) {
+    if (!noCache && !isNetworkError(fetchError)) {
       setResourceError(source, fetchError);
     }
 
@@ -169,7 +172,7 @@ async function download(url, options = {}) {
    */
   const getMetadata = getResourceMetadata(source, fetched.response, requestOptions);
 
-  if (getMetadata) {
+  if (!noCache && getMetadata) {
     const cached = getResourceState(getMetadata);
 
     if (cached?.status === "ok") {
@@ -198,7 +201,7 @@ async function download(url, options = {}) {
      * GET 응답 헤더를 받은 뒤 body 다운로드에 실패한 경우에도
      * 실제 파일 다운로드 실패로 처리한다.
      */
-    if (!isNetworkError(error)) {
+    if (!noCache && !isNetworkError(error)) {
       setResourceError(source, error);
     }
 
@@ -213,7 +216,9 @@ async function download(url, options = {}) {
    * cache 정책이 바뀌거나 수동으로 일부 cache를 수정한 경우에도
    * 상태가 일관되도록 해둔다.
    */
-  clearResourceError(source);
+  if (!noCache) {
+    clearResourceError(source);
+  }
 
   /*
    * 반드시 transform 전에 원격 서버가 알려준 원본 크기를 보관한다.
@@ -238,7 +243,10 @@ async function download(url, options = {}) {
      * 이 URL로부터 정상적인 로컬 리소스를 만들지 못한 것이므로
      * 실패 cache에 기록한다.
      */
-    setResourceError(source, error);
+    if (!noCache) {
+      setResourceError(source, error);
+    }
+
     throw error;
   }
 
@@ -304,7 +312,7 @@ async function download(url, options = {}) {
    * 이 경우 파일 다운로드와 저장 자체는 정상적으로 완료하되
    * resources에는 넣지 않는다.
    */
-  if (resourceMetadata.size) {
+  if (!noCache && resourceMetadata.size) {
     setResource(resourceMetadata, destination);
   }
 

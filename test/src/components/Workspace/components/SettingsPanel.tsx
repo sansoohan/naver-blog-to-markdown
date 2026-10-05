@@ -10,6 +10,8 @@ type SettingsPanelProps = {
 
 function SettingsPanel({show, blogIds, blogId, setBlogId, onClose}: SettingsPanelProps) {
   const {
+    applyFonts,
+    setApplyFonts,
     removeParagraphMargins,
     setRemoveParagraphMargins,
     darkMode,
@@ -118,6 +120,29 @@ function SettingsPanel({show, blogIds, blogId, setBlogId, onClose}: SettingsPane
                   role="switch"
                   checked={fancyCheckboxes}
                   onChange={event => setFancyCheckboxes(event.target.checked)}
+                />
+              </div>
+            </label>
+
+            <label
+              className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-3 py-3"
+              htmlFor="applyFonts"
+            >
+              <div>
+                <div className="small fw-semibold">폰트 적용</div>
+                <div className="small text-secondary mt-1">
+                  백업된 네이버 블로그 폰트를 뷰어에 적용합니다.
+                </div>
+              </div>
+
+              <div className="form-check form-switch flex-shrink-0 m-0">
+                <input
+                  id="applyFonts"
+                  className="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  checked={applyFonts}
+                  onChange={event => setApplyFonts(event.target.checked)}
                 />
               </div>
             </label>

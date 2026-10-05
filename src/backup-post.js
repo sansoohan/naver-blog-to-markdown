@@ -5,7 +5,7 @@ const {makeHtml, detectEditorVersion} = require("./make-html");
 const {makeMarkdown} = require("./make-markdown");
 const {createContentHash} = require("./content-hash");
 const {
-  setBackupOutputRoot,
+  setBackupBlogRoot,
   loadBackupCache,
   loadBackupCacheUnlocked,
   saveBackupCacheUnlocked,
@@ -69,9 +69,10 @@ async function convertPostUnlocked(blogId, logNo, options = {}) {
   } = options;
 
   const reuseResources = update || useCache;
-  const outputRoot = outputDir ? path.resolve(outputDir) : path.join(process.cwd(), "output");
+  const blogRoot = outputDir ? path.resolve(outputDir) : path.join(process.cwd(), "output");
+  const outputRoot = path.dirname(blogRoot);
 
-  setBackupOutputRoot(outputRoot);
+  setBackupBlogRoot(blogRoot);
 
   blogId = String(blogId);
   logNo = String(logNo);
@@ -128,7 +129,7 @@ async function convertPostUnlocked(blogId, logNo, options = {}) {
 
   const category = normalizedCategoryParts.join(" > ");
   const folderName = `${logNo}_${safeFilename(title)}`;
-  const finalOutputDir = path.join(outputRoot, ...normalizedCategoryParts.map(safeFilename), folderName);
+  const finalOutputDir = path.join(blogRoot, ...normalizedCategoryParts.map(safeFilename), folderName);
   const relativePath = path.relative(process.cwd(), finalOutputDir);
   const previousOutputDir = previous?.path ? path.resolve(process.cwd(), previous.path) : null;
 
@@ -168,11 +169,7 @@ async function convertPostUnlocked(blogId, logNo, options = {}) {
    * PID까지 포함해 서로 다른 프로세스가 같은 글을 동시에 처리해도
    * 임시 폴더 이름이 충돌하지 않게 한다.
    */
-  const tempOutputDir = path.join(
-    outputRoot,
-    ".tmp",
-    `${blogId}_${logNo}_${process.pid}_${Date.now()}`
-  );
+  const tempOutputDir = path.join(blogRoot,".tmp",`${blogId}_${logNo}_${process.pid}_${Date.now()}`);
 
   removeDirectory(tempOutputDir);
   fs.mkdirSync(tempOutputDir, {recursive: true});
@@ -199,6 +196,7 @@ async function convertPostUnlocked(blogId, logNo, options = {}) {
       logNo,
       editorVersion,
       previousHtml,
+      outputRoot,
     });
 
     const hashSourceFilename = `.hash-source-${contentHash.slice(0, 16)}.html`;

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
+  APPLY_FONTS_KEY,
   DARK_MODE_KEY,
   FANCY_CHECKBOXES_KEY,
   getBooleanSetting,
@@ -14,6 +15,8 @@ type AppSettingsContextValue = {
   darkMode: boolean;
   fancyCheckboxes: boolean;
   syncScroll: boolean;
+  applyFonts: boolean;
+  setApplyFonts: (value: boolean) => void;
   setRemoveParagraphMargins: (value: boolean) => void;
   setDarkMode: (value: boolean) => void;
   setFancyCheckboxes: (value: boolean) => void;
@@ -27,6 +30,10 @@ type AppSettingsProviderProps = {
 };
 
 export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
+  const [applyFonts, setApplyFontsState] = useState(() => {
+    return getBooleanSetting(APPLY_FONTS_KEY, true);
+  });
+
   const [removeParagraphMargins, setRemoveParagraphMarginsState] = useState(() => {
     return getBooleanSetting(REMOVE_PARAGRAPH_MARGINS_KEY, true);
   });
@@ -46,6 +53,11 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
   useEffect(() => {
     document.documentElement.setAttribute("data-bs-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
+
+  const setApplyFonts = (value: boolean) => {
+    setApplyFontsState(value);
+    setBooleanSetting(APPLY_FONTS_KEY, value);
+  };
 
   const setRemoveParagraphMargins = (value: boolean) => {
     setRemoveParagraphMarginsState(value);
@@ -70,10 +82,12 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
   return (
     <AppSettingsContext.Provider
       value={{
+        applyFonts,
         removeParagraphMargins,
         darkMode,
         fancyCheckboxes,
         syncScroll,
+        setApplyFonts,
         setRemoveParagraphMargins,
         setDarkMode,
         setFancyCheckboxes,

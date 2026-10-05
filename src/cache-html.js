@@ -5,7 +5,7 @@ let OUTPUT_ROOT = path.resolve(process.cwd(), "output");
 let CACHE_FILE = path.join(OUTPUT_ROOT, "backup-cache.json");
 let LOCK_FILE = path.join(OUTPUT_ROOT, ".backup-cache.lock");
 
-function setBackupOutputRoot(outputDir) {
+function setBackupBlogRoot(outputDir) {
   OUTPUT_ROOT = outputDir
     ? path.resolve(outputDir)
     : path.resolve(process.cwd(), "output");
@@ -366,7 +366,7 @@ function checkBackupCache() {
 
 module.exports = {
   CACHE_FILE,
-  setBackupOutputRoot,
+  setBackupBlogRoot,
   loadBackupCache,
   loadBackupCacheUnlocked,
   saveBackupCache,

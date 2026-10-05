@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const cheerio = require("cheerio");
 const Prism = require("prismjs");
 const loadLanguages = require("prismjs/components/");
@@ -94,7 +96,6 @@ function getPostRoot($, editorVersion) {
 
     if (contentsStart.length) {
       const version3 = contentsStart.nextAll(".__se_component_area").first();
-
       if (version3.length) return version3;
     }
   }
@@ -165,6 +166,60 @@ function rewriteCssUrls(css, cssUrl) {
   });
 }
 
+function getWoff2FontUrls(css) {
+  const urls = [];
+
+  for (const match of String(css).matchAll(/@font-face\s*\{[\s\S]*?\}/gi)) {
+    const block = match[0];
+
+    for (const source of block.matchAll(/url\(\s*(["']?)([^"')]+\.woff2(?:\?[^"')\s]*)?)\1\s*\)\s*format\(\s*(["'])woff2\3\s*\)/gi)) {
+      urls.push(normalizeUrl(source[2]));
+    }
+  }
+
+  return [...new Set(urls.filter(Boolean))];
+}
+
+async function downloadCssFonts(cssPath, outputRoot) {
+  if (!cssPath || !outputRoot) return;
+
+  const css = fs.readFileSync(cssPath, "utf8");
+  const urls = getWoff2FontUrls(css);
+
+  if (!urls.length) return;
+
+  const fontDir = path.join(outputRoot, ".font");
+  fs.mkdirSync(fontDir, {recursive: true});
+
+  for (const url of urls) {
+    let filename;
+
+    try {
+      filename = path.posix.basename(new URL(url).pathname);
+    } catch {
+      continue;
+    }
+
+    if (!filename) continue;
+
+    const destination = path.join(fontDir, filename);
+    if (fs.existsSync(destination)) continue;
+
+    try {
+      await download(url, {
+        outputDir: fontDir,
+        filename,
+        overwrite: true,
+        noCache: true,
+        logLabel: "폰트",
+        headers: {"User-Agent": "Mozilla/5.0", Referer: "https://blog.naver.com/"},
+      });
+    } catch (error) {
+      console.warn(`폰트 다운로드 실패: ${filename} (${error.message})`);
+    }
+  }
+}
+
 async function downloadCss(info, outputDir, label) {
   if (!info) return "";
 
@@ -187,10 +242,17 @@ async function downloadCss(info, outputDir, label) {
   }
 }
 
-async function downloadLayoutCss($, outputDir) {
+async function downloadLayoutCss($, outputDir, outputRoot) {
   const info = getLayoutCssInfo($);
   if (!info) return "";
-  return downloadCss(info, outputDir, "블로그 레이아웃");
+
+  const filename = await downloadCss(info, outputDir, "블로그 레이아웃");
+
+  if (filename) {
+    await downloadCssFonts(path.join(outputDir, filename), outputRoot);
+  }
+
+  return filename;
 }
 
 async function downloadPostViewCss($, outputDir, editorVersion) {
@@ -202,13 +264,19 @@ async function downloadPostViewCss($, outputDir, editorVersion) {
   return downloadCss(info, outputDir, "PostView");
 }
 
-async function downloadViewerCss($, outputDir, editorVersion) {
+async function downloadViewerCss($, outputDir, outputRoot, editorVersion) {
   if (editorVersion !== 3 && editorVersion !== 4) return "";
 
   const info = getViewerCssInfo($, editorVersion);
   if (!info) return "";
 
-  return downloadCss(info, outputDir, `에디터 v${editorVersion}`);
+  const filename = await downloadCss(info, outputDir, `에디터 v${editorVersion}`);
+
+  if (filename) {
+    await downloadCssFonts(path.join(outputDir, filename), outputRoot);
+  }
+
+  return filename;
 }
 
 function getBodyAttributes($) {
@@ -473,9 +541,9 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
   const imageManager = createImageManager(outputDir);
 
   const wrappers = prepareWrapperPath(root, editorVersion);
-  const layoutCssFilename = await downloadLayoutCss($, outputDir);
+  const layoutCssFilename = await downloadLayoutCss($, outputDir, options.outputRoot);
   const postViewCssFilename = await downloadPostViewCss($, outputDir, editorVersion);
-  const viewerCssFilename = await downloadViewerCss($, outputDir, editorVersion);
+  const viewerCssFilename = await downloadViewerCss($, outputDir, options.outputRoot, editorVersion);
 
   await localizeImages($, root, imageManager, {editorVersion, previous$, previousRoot});
   await localizeNaverVideos($, root, imageManager, {editorVersion, previous$, previousRoot});

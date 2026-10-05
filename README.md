@@ -57,6 +57,8 @@ npm run blog -- "https://blog.naver.com/[네이버ID]" --cache                  
 
 ```text
 output/
+├── .font/                                # SmartEditor 웹폰트
+│   └── se-nanumgothic-regular.woff2
 └── [네이버ID]/
     ├── backup-cache.json                 # 해당 블로그의 변경 여부 기록(도중에 이어서 백업)
     ├── categories.json                   # 해당 블로그의 카테고리 정보

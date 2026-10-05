@@ -1,6 +1,6 @@
 const readline = require("readline");
 const {convertPost} = require("./backup-page");
-const {setBackupOutputRoot, checkBackupCache} = require("./src/cache-html");
+const {setBackupBlogRoot, checkBackupCache} = require("./src/cache-html");
 const backupMonitor = require("./src/backup-monitor");
 const {runCli} = require("./src/cli");
 const {withCategorySearchLock} = require("./src/category-search-lock");
@@ -75,7 +75,7 @@ async function backupPosts(blogId, posts, options = {}) {
     session = "",
   } = options;
 
-  setBackupOutputRoot(outputDir);
+  setBackupBlogRoot(outputDir);
   backupMonitor.start(outputDir, blogId, posts.length);
 
   if (!posts.length) {

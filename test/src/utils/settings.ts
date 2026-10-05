@@ -1,6 +1,7 @@
 export const REMOVE_PARAGRAPH_MARGINS_KEY = "removeParagraphMargins";
 export const DARK_MODE_KEY = "darkMode";
 export const FANCY_CHECKBOXES_KEY = "fancyCheckboxes";
+export const APPLY_FONTS_KEY = "applyFonts";
 
 export function getBooleanSetting(key: string, defaultValue: boolean) {
   const saved = localStorage.getItem(key);
@@ -22,6 +23,43 @@ function getOrCreateStyle(document: Document, id: string) {
   }
 
   return style;
+}
+
+export function applyFontSetting(document: Document, applyFonts: boolean) {
+  const linkId = "viewer-fonts";
+  const overrideId = "viewer-font-override";
+
+  const currentLink = document.getElementById(linkId);
+  const override = getOrCreateStyle(document, overrideId);
+
+  if (!applyFonts) {
+    currentLink?.remove();
+
+    override.textContent = `
+      .se-viewer,
+      .se-viewer *,
+      .post,
+      .post * {
+        font-family: Arial, "Noto Sans KR", sans-serif !important;
+      }
+
+      body {
+        font-family: Arial, "Noto Sans KR", sans-serif !important;
+      }
+    `;
+
+    return;
+  }
+
+  override.textContent = "";
+
+  if (currentLink) return;
+
+  const link = document.createElement("link");
+  link.id = linkId;
+  link.rel = "stylesheet";
+  link.href = "/api/fonts.css";
+  document.head.appendChild(link);
 }
 
 export function applyOriginalSettings(document: Document, darkMode: boolean) {
@@ -47,11 +85,20 @@ export function applyMarkdownSettings(
   removeParagraphMargins: boolean,
   darkMode: boolean,
   fancyCheckboxes: boolean,
+  applyFonts: boolean,
 ) {
   document.documentElement.style.zoom = `${markdownZoom}%`;
 
   const style = getOrCreateStyle(document, "viewer-markdown-settings");
   const rules: string[] = [];
+
+  if (applyFonts) {
+    rules.push(`
+      body {
+        font-family: se-nanumgothic, Arial, "나눔고딕", NanumGothic, sans-serif, Meiryo !important;
+      }
+    `);
+  }
 
   if (removeParagraphMargins) {
     rules.push(`

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "~/contexts/AppSettingsContext";
 import type { PostInfo } from "~/types/post";
-import { applyMarkdownSettings, applyOriginalSettings } from "~/utils/settings";
+import { applyFontSetting, applyMarkdownSettings, applyOriginalSettings } from "~/utils/settings";
 import { useScrollPosition } from "./hooks/useScrollPosition";
 import { useScrollSync } from "./hooks/useScrollSync";
 import { useSplitter } from "./hooks/useSplitter";
@@ -20,7 +20,7 @@ type ViewerProps = {
 };
 
 function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: ViewerProps) {
-  const {removeParagraphMargins, darkMode, fancyCheckboxes, syncScroll} = useAppSettings();
+  const {removeParagraphMargins, darkMode, fancyCheckboxes, applyFonts, syncScroll} = useAppSettings();
 
   const [originalLoaded, setOriginalLoaded] = useState(false);
   const [markdownLoaded, setMarkdownLoaded] = useState(false);
@@ -106,13 +106,22 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
     const markdownDocument = markdownFrameRef.current?.contentDocument;
 
     if (originalDocument) {
+      applyFontSetting(originalDocument, applyFonts);
       applyOriginalSettings(originalDocument, darkMode);
     }
 
     if (markdownDocument) {
-      applyMarkdownSettings(markdownDocument, markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes);
+      applyFontSetting(markdownDocument, applyFonts);
+      applyMarkdownSettings(
+        markdownDocument,
+        markdownZoom,
+        removeParagraphMargins,
+        darkMode,
+        fancyCheckboxes,
+        applyFonts
+      );
     }
-  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, post?.postId, refreshKey]);
+  }, [markdownZoom, removeParagraphMargins, darkMode, fancyCheckboxes, applyFonts, post?.postId, refreshKey]);
 
   useEffect(() => {
     const originalWindow = originalFrameRef.current?.contentWindow;
@@ -180,6 +189,7 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
                   if (!document) return;
 
+                  applyFontSetting(document, applyFonts);
                   applyOriginalSettings(document, darkMode);
                   restoreOriginalScrollPosition(event.currentTarget);
                   setOriginalLoaded(true);
@@ -294,12 +304,15 @@ function Viewer({post, refreshKey, onShortcut, onRegisterSaveScrollPositions}: V
 
                   if (!document) return;
 
+                  applyFontSetting(document, applyFonts);
+
                   applyMarkdownSettings(
                     document,
                     markdownZoom,
                     removeParagraphMargins,
                     darkMode,
-                    fancyCheckboxes
+                    fancyCheckboxes,
+                    applyFonts
                   );
 
                   restoreMarkdownScrollPosition(event.currentTarget);

@@ -81,7 +81,7 @@ export async function scanBlogIds(outputRoot: string): Promise<string[]> {
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (entry.name === ".tmp") continue;
+    if (entry.name.startsWith(".")) continue;
 
     const cachePath = path.join(outputRoot, entry.name, "backup-cache.json");
 

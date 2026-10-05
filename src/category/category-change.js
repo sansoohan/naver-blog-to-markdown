@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  setBackupOutputRoot,
+  setBackupBlogRoot,
   loadBackupCacheUnlocked,
   saveBackupCacheUnlocked,
   acquireBackupLock,
@@ -82,7 +82,7 @@ function reorganizeCategoryBackups(categories, outputDir, blogId) {
 
   if (!previousCategories.length) return;
 
-  setBackupOutputRoot(outputRoot);
+  setBackupBlogRoot(outputRoot);
 
   const lock = acquireBackupLock();
 
