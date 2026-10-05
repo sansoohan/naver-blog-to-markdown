@@ -247,6 +247,7 @@ function getLegacyPreservedCss(css) {
     if (
       property === "font-size"
       || property === "font-family"
+      || property === "line-height"           // Markdown에서 적용할 수 없는 줄 간격은 보존하지 않는다.
       || property === "letter-spacing"
       || property === "font-weight"
       || property === "font-style"

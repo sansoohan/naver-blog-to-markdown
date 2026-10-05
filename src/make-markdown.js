@@ -520,6 +520,26 @@ function protectLegacyPastedHtml($, root, store, editorVersion) {
   if (!content.length) return;
 
   /*
+   * SmartEditor 1은 기본 본문 .view 안에
+   * 같은 .view 래퍼가 여러 겹 중첩되는 경우가 있다.
+   *
+   * 이 래퍼의 class / style은 네이버 기본 본문 서식이므로
+   * 직접 삽입 HTML로 보호하지 않고 내부 내용을 그대로 전달한다.
+   */
+  if (editorVersion === 1) {
+    while (true) {
+      const children = content.children();
+
+      if (children.length !== 1 || !children.first().hasClass("view")) break;
+
+      const child = children.first();
+
+      content.replaceWith(content.contents());
+      content = child;
+    }
+  }
+
+  /*
    * SmartEditor 1/2의 기본 본문에는 의미 없는 <div> 래퍼가 들어갈 수 있다.
    * 이런 래퍼는 몇 겹이든 보호하지 않고 내부의 일반 <p>가
    * 문단 변환 단계까지 전달되도록 한다.
