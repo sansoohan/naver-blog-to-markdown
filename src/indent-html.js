@@ -1,5 +1,15 @@
 function fixHtmlIndentation(html) {
-  const lines = String(html).split(/\r?\n/);
+  const protectedCodeBlocks = [];
+  const protectedHtml = String(html).replace(
+    /<div\b[^>]*class=(["'])[^"']*\b__se_code_view\b[^"']*\1[^>]*>[\s\S]*?<\/div>/gi,
+    match => {
+      const token = `NAVERCODEBLOCKPLACEHOLDER${protectedCodeBlocks.length}END`;
+      protectedCodeBlocks.push(match);
+      return token;
+    }
+  );
+
+  const lines = protectedHtml.split(/\r?\n/);
   const result = [];
   let depth = 0;
 
@@ -39,7 +49,14 @@ function fixHtmlIndentation(html) {
     }
   }
 
-  return `${result.join("\n")}\n`;
+  let resultHtml = `${result.join("\n")}\n`;
+
+  resultHtml = resultHtml.replace(
+    /NAVERCODEBLOCKPLACEHOLDER(\d+)END/g,
+    (_, index) => protectedCodeBlocks[Number(index)]
+  );
+
+  return resultHtml;
 }
 
 module.exports = {fixHtmlIndentation};

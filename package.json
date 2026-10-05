@@ -23,6 +23,7 @@
     "html-prettify": "^1.0.7",
     "js-beautify": "^2.0.3",
     "playwright": "^1.63.0",
+    "prismjs": "^1.30.0",
     "turndown": "^7.2.4"
   }
 }

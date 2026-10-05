@@ -1,9 +1,13 @@
 const cheerio = require("cheerio");
+const Prism = require("prismjs");
+const loadLanguages = require("prismjs/components/");
 const {createImageManager, localizeImages} = require("./image");
 const {restoreYoutubeVideos, localizeNaverVideos} = require("./video");
 const {localizeAttachments} = require("./attachment");
 const {download} = require("./downloader");
 const {getContentWidths} = require("./content-width");
+
+loadLanguages();
 
 function normalizeEditorVersion(value) {
   const version = Number(value);
@@ -330,6 +334,31 @@ function cleanRuntimeClasses($, root) {
   });
 }
 
+function highlightCodeBlocks($, root) {
+  root.find(".__se_code_view").each((_, element) => {
+    const code = $(element);
+    const className = code.attr("class") || "";
+    const match = className.match(/\blanguage-([^\s]+)/);
+
+    if (!match) return;
+
+    const language = match[1].toLowerCase();
+    const grammar = Prism.languages[language];
+
+    if (!grammar) return;
+
+    const highlighted = Prism.highlight(code.text(), grammar, language).replace(
+      /class="token ([^"]+)"/g,
+      (_, classes) => {
+        const names = classes.split(/\s+/);
+        return `class="token se-code-${names[0]}${names.slice(1).map(name => ` ${name}`).join("")}"`;
+      }
+    );
+
+    code.html(highlighted);
+  });
+}
+
 function cleanArchivedRoot($, root) {
   root.find("script").remove();
   root.find(".post-top,.post_footer_contents,.bottom_adpost,.post-btn").remove();
@@ -460,6 +489,7 @@ async function makeHtml(rawHtml, outputDir, options = {}) {
    */
   deferYouTubeIframes($, root);
 
+  highlightCodeBlocks($, root);
   cleanArchivedRoot($, root);
 
   const protectedBody = protectPostBody(wrapPostBody($.html(root), wrappers));
