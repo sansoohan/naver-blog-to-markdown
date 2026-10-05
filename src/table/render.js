@@ -38,6 +38,7 @@ table.naver-legacy-table:not(.naver-legacy-table-transparent) td {
 table.naver-legacy-table th,
 table.naver-legacy-table td {
   vertical-align: middle;
+  line-height: normal;
 }
 
 table.naver-legacy-table p {
