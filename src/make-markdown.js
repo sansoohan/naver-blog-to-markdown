@@ -361,7 +361,6 @@ function protectImages($, root, store) {
 
     for (const imageElement of images) {
       const markdown = makeImageMarkdown($(imageElement));
-
       if (markdown) parts.push(markdown);
     }
 
@@ -536,6 +535,37 @@ function protectLegacyPastedHtml($, root, store, editorVersion) {
     if (!node.parent().length) continue;
     if (node.hasClass("naver-protected")) continue;
     if (node.hasClass("autosourcing-stub-saved")) continue;
+
+    /*
+     * SmartEditor 2는 일반 문단들을 <div align="...">로 감싸는 경우가 있다.
+     *
+     * 직계 요소가 모두 <p>인 div만 SmartEditor 2의 문단 정렬 래퍼로 취급한다.
+     * 그 외 이미지, 표, 영상 등의 요소가 포함된 div는 기존처럼 HTML로 보존한다.
+     */
+    if (editorVersion === 2 && String(element.tagName || "").toLowerCase() === "div") {
+      const childElements = node.children().toArray();
+      const isParagraphWrapper = (
+        childElements.length > 0
+        && childElements.every(child => String(child.tagName || "").toLowerCase() === "p")
+      );
+
+      if (isParagraphWrapper) {
+        const align = String(node.attr("align") || "").trim().toLowerCase();
+
+        if (align === "center" || align === "right") {
+          for (const child of childElements) {
+            const paragraph = $(child);
+            const style = paragraph.attr("style") || "";
+            const separator = style && !style.trim().endsWith(";") ? ";" : "";
+
+            paragraph.attr("style", `${style}${separator}text-align:${align};`);
+          }
+        }
+
+        node.replaceWith(node.contents());
+        continue;
+      }
+    }
 
     const attributes = element.attribs || {};
     const attributeNames = Object.keys(attributes);
