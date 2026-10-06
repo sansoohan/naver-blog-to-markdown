@@ -253,19 +253,30 @@ async function fetchResource(url, options = {}) {
       redirect,
     };
 
-    const signal = getRequestSignal(options);
+    let controller = null;
+    let timeoutId = null;
 
-    if (signal) fetchOptions.signal = signal;
-
-    const response = await fetch(url, fetchOptions);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    if (options.signal) {
+      fetchOptions.signal = options.signal;
+    } else if (options.timeout > 0) {
+      controller = new AbortController();
+      fetchOptions.signal = controller.signal;
+      timeoutId = setTimeout(() => controller.abort(), options.timeout);
     }
 
-    return {
-      response,
-    };
+    try {
+      const response = await fetch(url, fetchOptions);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return {
+        response,
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   });
 }
 

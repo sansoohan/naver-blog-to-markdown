@@ -30,6 +30,60 @@ const {
   resolveNaverVideo,
 } = require("./utils");
 
+const PROGRESS_THRESHOLD = 10 * 1024 * 1024;
+const PROGRESS_STEP = 5;
+
+function formatMegabytes(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function readResponseBuffer(response, logLabel) {
+  const totalSize = getHeaderSize(response);
+  const showProgress = totalSize >= PROGRESS_THRESHOLD && response.body;
+
+  if (!response.body) {
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let receivedSize = 0;
+  let nextProgress = PROGRESS_STEP;
+  let progressShown = false;
+
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+
+      if (done) break;
+
+      const chunk = Buffer.from(value);
+      chunks.push(chunk);
+      receivedSize += chunk.length;
+
+      if (!showProgress) continue;
+
+      const progress = Math.min(100, Math.floor(receivedSize / totalSize * 100));
+
+      if (progress < nextProgress) continue;
+
+      const displayedProgress = Math.min(100, Math.floor(progress / PROGRESS_STEP) * PROGRESS_STEP);
+
+      process.stdout.write(
+        `\r${logLabel} 다운로드: ${displayedProgress}% (${formatMegabytes(receivedSize)} / ${formatMegabytes(totalSize)})`
+      );
+
+      progressShown = true;
+      nextProgress = displayedProgress + PROGRESS_STEP;
+    }
+  } finally {
+    if (progressShown) process.stdout.write("\n");
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks, receivedSize);
+}
+
 async function download(url, options = {}) {
   const defaultOptions = {
     outputDir: "",
@@ -191,7 +245,7 @@ async function download(url, options = {}) {
   let rawBuffer;
 
   try {
-    rawBuffer = Buffer.from(await fetched.response.arrayBuffer());
+    rawBuffer = await readResponseBuffer(fetched.response, logLabel);
 
     if (!rawBuffer.length) {
       throw new Error("빈 응답");
