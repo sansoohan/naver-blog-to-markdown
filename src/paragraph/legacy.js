@@ -571,6 +571,7 @@ function protectLegacyAutosourcingBlocks($, root, store) {
  */
 function protectLegacyParagraphs($, root, store) {
   const paragraphs = root.find("p").toArray();
+  let previousWasNbspEmpty = false;
 
   for (const element of paragraphs) {
     const paragraph = $(element);
@@ -578,12 +579,18 @@ function protectLegacyParagraphs($, root, store) {
     /*
      * SmartEditor 3.x 이상 문단은 신형 로직이 담당한다.
      */
-    if (paragraph.hasClass("se-text-paragraph")) continue;
+    if (paragraph.hasClass("se-text-paragraph")) {
+      previousWasNbspEmpty = false;
+      continue;
+    }
 
     /*
      * 다른 변환기가 이미 보호한 영역은 건드리지 않는다.
      */
-    if (paragraph.closest(".naver-protected").length) continue;
+    if (paragraph.closest(".naver-protected").length) {
+      previousWasNbspEmpty = false;
+      continue;
+    }
 
     /*
      * 단순 텍스트 문단만 처리한다.
@@ -591,7 +598,23 @@ function protectLegacyParagraphs($, root, store) {
      * 이미지, 표, 영상, 목록, 코드, 인용문 등의 블록 구조가 들어 있는
      * <p>는 다른 변환 로직이나 Turndown이 처리하도록 그대로 둔다.
      */
-    if (paragraph.find("img,table,iframe,video,ul,ol,pre,blockquote").length) continue;
+    if (paragraph.find("img,table,iframe,video,ul,ol,pre,blockquote").length) {
+      previousWasNbspEmpty = false;
+      continue;
+    }
+
+    const html = paragraph.html() || "";
+    const isNbspEmpty = /^(?:&nbsp;|\u00a0)$/.test(html.trim());
+    const isCompletelyEmpty = html.trim() === "";
+
+    /*
+     * SmartEditor 1.x / 2.x에서 &nbsp; 빈 문단 뒤에
+     * 완전히 빈 <p></p>가 연속으로 생성되는 경우가 있다.
+     *
+     * 이 빈 <p>들은 별도의 빈 줄로 취급하지 않고
+     * 앞의 &nbsp; 빈 문단 하나로 합친다.
+     */
+    if (previousWasNbspEmpty && isCompletelyEmpty) continue;
 
     const rendered = renderLegacyParagraph(element);
     const indent = rendered.empty ? "" : getLegacyParagraphIndent(paragraph);
@@ -599,6 +622,8 @@ function protectLegacyParagraphs($, root, store) {
     const token = store.add(value);
 
     paragraph.replaceWith(`<div class="naver-protected">${token}</div>`);
+
+    previousWasNbspEmpty = isNbspEmpty;
   }
 }
 
