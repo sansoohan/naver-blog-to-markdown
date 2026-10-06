@@ -399,6 +399,34 @@ function createContentHash(root) {
   });
 
   /*
+   * [해시 제외 - 구형 네이버 첨부파일 다운로드 URL 텍스트 해시]
+   *
+   * 구형 게시글에서는 첨부파일 다운로드 URL 자체가 링크 텍스트로 표시되는 경우가 있다.
+   * href의 동적 해시를 정규화해도 화면에 표시되는 URL 텍스트의 해시가 그대로 남아 있으면
+   * 같은 첨부파일이어도 페이지를 다시 불러올 때 콘텐츠 해시가 달라질 수 있다.
+   *
+   * 실제 확인된 차이:
+   *
+   *   https://download.blog.naver.com/open/<동적 해시>/<고정 경로>/<파일명>
+   *
+   * 첨부파일의 나머지 경로와 파일명은 유지하고 동적 해시 부분만 고정된 값으로 정규화한다.
+   *
+   * 중요:
+   * 일반 텍스트 전체를 변경하지 말 것.
+   * download.blog.naver.com/open/ URL에 포함된 동적 해시 부분만 정규화해야 한다.
+   */
+  clone.find("*").contents().filter((_, node) => node.type === "text").each((_, node) => {
+    const text = node.data || "";
+
+    const normalizedText = text.replace(
+      /(https:\/\/download\.blog\.naver\.com\/open\/)[^/\s<]+\/(?=[^\s<])/gi,
+      "$1{HASH}/"
+    );
+
+    if (normalizedText !== text) node.data = normalizedText;
+  });
+
+  /*
    * [해시 제외 - HTML 주석]
    *
    * HTML 주석은 화면에 표시되는 게시글 내용이 아니며 네이버 내부 처리에 의해 달라질 수 있으므로 제외한다.
