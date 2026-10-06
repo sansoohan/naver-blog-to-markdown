@@ -557,6 +557,22 @@ function protectLegacyPastedHtml($, root, store, editorVersion) {
     if (node.hasClass("autosourcing-stub-saved")) continue;
 
     /*
+     * SmartEditor 1.x / 2.x 본문 안에 다른 구형 본문이
+     * #postViewArea > .post-view 구조로 중첩되는 경우가 있다.
+     *
+     * 붙여 넣은 HTML이 아니라 네이버 본문 래퍼이므로
+     * 두 래퍼를 제거하고 내부 문단을 기존 Markdown 변환으로 넘긴다.
+     */
+    if (node.attr("id") === "postViewArea") {
+      const nestedPostView = node.children(".post-view").first();
+
+      if (nestedPostView.length) {
+        node.replaceWith(nestedPostView.contents());
+        continue;
+      }
+    }
+
+    /*
      * SmartEditor 2는 일반 문단들을 <div align="...">로 감싸는 경우가 있다.
      *
      * 직계 요소가 모두 <p>인 div만 SmartEditor 2의 문단 정렬 래퍼로 취급한다.
