@@ -562,6 +562,61 @@ function protectLegacyAutosourcingBlocks($, root, store) {
 }
 
 /*
+ * SmartEditor 1.x / 2.x에서 스타일이 적용된 문단이
+ * <p>가 아닌 <div> 구조로 생성되는 경우가 있다.
+ *
+ * 이 구조를 일반 Markdown으로 변환하면 내부 <span>의 스타일이
+ * 사라질 수 있으므로 해당 블록은 HTML 그대로 보존한다.
+ */
+function protectLegacyStyledDivBlocks($, root, store) {
+  const blocks = root.find("div").toArray();
+
+  for (const element of blocks) {
+    const block = $(element);
+
+    if (block.closest(".naver-protected").length) continue;
+
+    const children = block.children();
+
+    if (!children.length) continue;
+    if (!children.toArray().every(child => String(child.name || "").toLowerCase() === "div")) continue;
+
+    const hasStyledSpan = children.toArray().some((child) => {
+      const span = $(child).children("span[style]");
+
+      return span.length === 1 && span.parent()[0] === child;
+    });
+
+    if (!hasStyledSpan) continue;
+
+    const valid = children.toArray().every((child) => {
+      const contents = $(child).contents().toArray().filter((node) => {
+        return node.type !== "text" || String(node.data || "").trim();
+      });
+
+      if (!contents.length) return true;
+
+      return contents.every((node) => {
+        if (node.type !== "tag") return false;
+
+        const name = String(node.name || "").toLowerCase();
+
+        if (name === "br") return true;
+        if (name !== "span") return false;
+
+        return Boolean(node.attribs?.style);
+      });
+    });
+
+    if (!valid) continue;
+
+    const token = store.add($.html(element));
+
+    block.replaceWith(`<div class="naver-protected">${token}</div>`);
+  }
+}
+
+/*
  * SmartEditor 1.x / 2.x의 구형 본문은 SmartEditor 3.x 이상처럼
  * .se-component.se-text / p.se-text-paragraph 구조를 사용하지 않고
  * 일반 <p>를 사용하는 경우가 있다.
@@ -570,6 +625,8 @@ function protectLegacyAutosourcingBlocks($, root, store) {
  * 일반 텍스트 <p>를 미리 보호한다.
  */
 function protectLegacyParagraphs($, root, store) {
+  protectLegacyStyledDivBlocks($, root, store);
+
   const paragraphs = root.find("p").toArray();
   let previousWasNbspEmpty = false;
 
