@@ -658,6 +658,20 @@ function protectLegacyParagraphs($, root, store) {
     if (paragraph.closest(".naver-protected").length) continue;
 
     /*
+     * 텍스트와 다른 콘텐츠가 한 <p> 안에 섞여 있으면
+     * Markdown으로 분리하지 않고 문단 전체를 HTML 그대로 보존한다.
+     */
+    const hasText = Boolean(paragraph.text().trim());
+    const hasNonTextContent = paragraph.find("img,table,iframe,video,ul,ol,pre,blockquote").length > 0;
+
+    if (hasText && hasNonTextContent) {
+      const token = store.add($.html(element));
+
+      paragraph.replaceWith(`<div class="naver-protected">${token}</div>`);
+      continue;
+    }
+
+    /*
      * 단순 텍스트 문단만 처리한다.
      *
      * 이미지, 표, 영상, 목록, 코드, 인용문 등의 블록 구조가 들어 있는
