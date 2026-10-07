@@ -72,6 +72,44 @@ function getPostBody(root) {
   throw new Error("콘텐츠 해시를 생성할 게시글 본문을 찾을 수 없습니다.");
 }
 
+/*
+ * [해시 제외 - 빈 class / style / align 속성]
+ *
+ * 네이버가 동일한 요소를 렌더링하면서 빈 class, style, align 속성을 추가하거나
+ * 속성 자체를 생략하는 경우가 있다.
+ *
+ * 또한 해시 정규화 과정에서 런타임 클래스를 제거한 결과
+ * 기존에 값이 있던 class 속성이 빈 class=""로 남을 수 있다.
+ *
+ * 실제 확인된 차이:
+ *
+ *   <img ... class="egjs-visible">
+ *     ↓ egjs-visible 제거
+ *   <img ... class="">
+ *
+ *   <img ...>
+ *
+ * 실제 값이 없는 동일한 요소이므로 빈 class, style, align 속성은 해시에서 제외한다.
+ *
+ * 중요:
+ * 이 처리는 다른 DOM 정규화가 빈 속성을 새로 만들 수 있으므로
+ * 모든 DOM 정규화가 끝난 뒤 최종 HTML을 생성하기 직전에 실행해야 한다.
+ *
+ * 다른 빈 속성은 존재 여부 자체가 의미를 가질 수 있으므로 제거하지 않는다.
+ */
+function removeEmptyAttributes(clone) {
+  clone.find("*").each((_, element) => {
+    const $el = clone.find(element);
+    const attrs = element.attribs || {};
+
+    for (const name of ["class", "style", "align"]) {
+      if (name in attrs && !String(attrs[name] || "").trim()) {
+        $el.removeAttr(name);
+      }
+    }
+  });
+}
+
 function createContentHash(root) {
   const postBody = getPostBody(root);
   const clone = postBody.clone();
@@ -92,27 +130,6 @@ function createContentHash(root) {
 
     for (const name of Object.keys(attrs)) {
       if (name === "id") {
-        $el.removeAttr(name);
-        continue;
-      }
-
-      /*
-       * [해시 제외 - 빈 class 속성]
-       *
-       * 네이버가 동일한 요소를 렌더링하면서 class=""를 추가하거나
-       * class 속성 자체를 생략하는 경우가 있다.
-       *
-       * 실제 확인된 차이:
-       *
-       *   <img ... class="">
-       *   <img ...>
-       *
-       * 실제 클래스가 없는 동일한 요소이므로 빈 class 속성은 해시에서 제외한다.
-       *
-       * 중요:
-       * 다른 빈 속성은 존재 여부 자체가 의미를 가질 수 있으므로 제거하지 않는다.
-       */
-      if (["class", "style", "align"].includes(name) && !String(attrs[name] || "").trim()) {
         $el.removeAttr(name);
         continue;
       }
@@ -425,6 +442,14 @@ function createContentHash(root) {
 
     if (normalizedText !== text) node.data = normalizedText;
   });
+
+  /*
+   * 모든 DOM 정규화가 끝난 뒤 빈 속성을 제거한다.
+   *
+   * removeClass() 등의 처리로 class=""가 새로 만들어질 수 있으므로
+   * 반드시 최종 HTML 직렬화 전에 실행해야 한다.
+   */
+  removeEmptyAttributes(clone);
 
   /*
    * [해시 제외 - HTML 주석]
