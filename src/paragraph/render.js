@@ -374,6 +374,13 @@ function groupRunsByLink(runs) {
  * 기존 기능 절대 누락/삭제/되돌리지 말 것.
  * 이 함수는 문단 맨 앞 공백까지 &nbsp;로 보존해야 한다.
  *
+ * 병신같은 ChatGPT가 아래 기능을 2번 누락함.
+ *
+ *   .replace(/^ +/, spaces => "&nbsp;".repeat(spaces.length))
+ *
+ * 1. 스페이스 2개 이상을 &nbsp;로 변환하도록 수정할 때 누락
+ * 2. Unicode 공백 보존 처리를 추가할 때 누락
+ *
  * 전체 코드 수정 시 과거 버전으로 덮어쓰지 말고,
  * 반드시 현재 최신 코드를 기준으로 필요한 부분만 수정할 것.
  *
@@ -381,7 +388,12 @@ function groupRunsByLink(runs) {
  */
 function preserveMultipleSpaces(text) {
   return String(text)
-    .replace(/^ +/, spaces => "&nbsp;".repeat(spaces.length))
+    .replace(/^[ \u00A0\u2000-\u200A\u202F\u205F\u3000]+/, spaces => {
+      return [...spaces].map(space => {
+        if (space === " ") return "&nbsp;";
+        return `&#${space.codePointAt(0)};`;
+      }).join("");
+    })
     .replace(/ {2,}/g, spaces => "&nbsp;".repeat(spaces.length));
 }
 
