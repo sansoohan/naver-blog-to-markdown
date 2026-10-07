@@ -617,6 +617,27 @@ function protectLegacyStyledDivBlocks($, root, store) {
 }
 
 /*
+ * SmartEditor 1.x / 2.x의 원본 HTML heading 처리.
+ *
+ * 구형 본문에 실제 <h1>~<h6> 태그가 존재하는 경우
+ * Markdown heading으로 변환하면 heading 자체와 내부 요소의
+ * 원본 HTML 스타일이 사라질 수 있으므로 전체 HTML을 그대로 보존한다.
+ */
+function protectLegacyHeadings($, root, store) {
+  const headings = root.find("h1, h2, h3, h4, h5, h6").toArray();
+
+  for (const element of headings) {
+    const heading = $(element);
+
+    if (heading.closest(".naver-protected").length) continue;
+
+    const token = store.add($.html(element));
+
+    heading.replaceWith(`<div class="naver-protected">${token}</div>`);
+  }
+}
+
+/*
  * SmartEditor 1.x / 2.x의 구형 본문은 SmartEditor 3.x 이상처럼
  * .se-component.se-text / p.se-text-paragraph 구조를 사용하지 않고
  * 일반 <p>를 사용하는 경우가 있다.
@@ -626,6 +647,7 @@ function protectLegacyStyledDivBlocks($, root, store) {
  */
 function protectLegacyParagraphs($, root, store) {
   protectLegacyStyledDivBlocks($, root, store);
+  protectLegacyHeadings($, root, store);
 
   /*
    * SmartEditor 1.x / 2.x에서 본문 바로 아래에 생성되는
