@@ -1,5 +1,5 @@
-// table/render.js
-const { isSimpleTable, renderSimpleTable, renderComplexTable } = require("./render");
+// table/index.js
+const { renderTable } = require("./render");
 const {
   shouldMakeTableTransparent,
   makeTableBackgroundTransparent,
@@ -18,7 +18,7 @@ function protectTables($, root, store) {
 
     if (!table.length) return;
 
-    const output = isSimpleTable($, table) ? renderSimpleTable($, table) : renderComplexTable($, table);
+    const output = renderTable($, table);
 
     component.replaceWith(`<div class="naver-protected">${store.add(output)}</div>`);
   });

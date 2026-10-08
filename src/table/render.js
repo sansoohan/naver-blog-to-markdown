@@ -1,5 +1,5 @@
 // table/render.js
-const { renderParagraph, renderParagraphHtml, escapeHtmlText } = require("../paragraph");
+const { renderParagraphHtml, escapeHtmlText } = require("../paragraph");
 const { getCellBackgroundColor, shouldMakeTableTransparent } = require("./legacy");
 
 const LEGACY_TABLE_STYLE = `
@@ -70,62 +70,6 @@ function getParagraphAlignment(paragraph) {
   const match = style.match(/(?:^|;)\s*text-align\s*:\s*(left|center|right|justify)/i);
 
   return match ? match[1].toLowerCase() : "";
-}
-
-function hasAlignment(cell) {
-  return cell.find("p.se-text-paragraph").toArray().some((element) => Boolean(getParagraphAlignment(cell.find(element))));
-}
-
-function isSimpleTable($, table) {
-  return table.find("tr").toArray().every((row) => {
-    return $(row).children("th, td").toArray().every((element) => {
-      const cell = $(element);
-      const style = cell.attr("style") || "";
-
-      return getSpan(cell, "rowspan") === 1
-        && getSpan(cell, "colspan") === 1
-        && !hasAlignment(cell)
-        && !/(?:^|;)\s*(?:width|height)\s*:/i.test(style);
-    });
-  });
-}
-
-function escapeMarkdownTableCell(value) {
-  return String(value).replace(/\|/g, "\\|").replace(/\r?\n+/g, "<br>");
-}
-
-function renderMarkdownCell(cell) {
-  const paragraphs = cell.find("p.se-text-paragraph").toArray();
-
-  if (!paragraphs.length) {
-    return escapeMarkdownTableCell(cell.text().replace(/\u200b/g, "").replace(/\u00a0/g, " ").trim());
-  }
-
-  return paragraphs.map((paragraph) => {
-    const rendered = renderParagraph(paragraph);
-    return rendered.empty ? "" : escapeMarkdownTableCell(rendered.text);
-  }).filter(Boolean).join("<br>");
-}
-
-function renderSimpleTable($, table) {
-  const rows = table.find("tr").toArray().map((row) => {
-    return $(row).children("th, td").toArray().map((cell) => renderMarkdownCell($(cell)));
-  });
-
-  if (!rows.length) return "";
-
-  const columnCount = Math.max(...rows.map((row) => row.length));
-  const normalizeRow = (row) => [...row, ...Array(Math.max(0, columnCount - row.length)).fill("")];
-  const output = [];
-
-  output.push(`| ${normalizeRow(rows[0]).join(" | ")} |`);
-  output.push(`| ${Array(columnCount).fill("---").join(" | ")} |`);
-
-  for (const row of rows.slice(1)) {
-    output.push(`| ${normalizeRow(row).join(" | ")} |`);
-  }
-
-  return output.join("\n");
 }
 
 function renderHtmlCell(cell) {
@@ -308,7 +252,7 @@ function getCellHeight(cell) {
   return match ? `${Number(match[1])}${match[2].toLowerCase()}` : "";
 }
 
-function renderComplexTable($, table) {
+function renderTable($, table) {
   /*
    * shouldMakeTableTransparent 안에서
    * 미지정 셀의 배경색 보정이 먼저 실행된다.
@@ -380,8 +324,6 @@ function getLegacyTableCss(markdown) {
 }
 
 module.exports = {
-  isSimpleTable,
-  renderSimpleTable,
-  renderComplexTable,
+  renderTable,
   getLegacyTableCss,
 };
